@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { PGlite } from '@electric-sql/pglite';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,13 +9,58 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readWorkspaceFile = (relativePath: string) => readFile(path.join(root, relativePath), 'utf8');
 
 test('dashboard user filtering exposes the full matching result set and page size', async () => {
-  const dashboard = await readWorkspaceFile('components/Dashboard.tsx');
+  const [dashboard, migration] = await Promise.all([
+    readWorkspaceFile('components/Dashboard.tsx'),
+    readWorkspaceFile('supabase/migrations/20261012010000_complete_dashboard_user_filter.sql'),
+  ]);
 
   assert.match(dashboard, /name === 'profileId' && value !== 'all'[\s\S]*setArticleStatusTab\('all'\)/);
   assert.match(dashboard, /const \[articlesPageSize, setArticlesPageSize\]/);
   assert.match(dashboard, /<option value="10">10<\/option>[\s\S]*<option value="25">25<\/option>[\s\S]*<option value="50">50<\/option>/);
   assert.match(dashboard, /في هذه الصفحة من أصل \{articlesTotalLabel\} نتيجة مطابقة/);
   assert.match(dashboard, /activeArticleFilterLabels/);
+  assert.match(migration, /from public\.article_access as access_row/);
+  assert.match(migration, /access_row\.article_id = article\.id/);
+  assert.match(migration, /access_row\.user_id::text = v_filters->>''profileId''/);
+});
+
+test('dashboard user filter migration safely upgrades the existing RPC definition', async () => {
+  const db = new PGlite();
+  const migration = await readWorkspaceFile('supabase/migrations/20261012010000_complete_dashboard_user_filter.sql');
+
+  await db.exec(`
+    create table public.articles (id uuid primary key, assigned_to uuid);
+    create table public.article_access (article_id uuid, user_id uuid);
+    create or replace function public.list_dashboard_articles_page(
+      p_page integer default 1,
+      p_page_size integer default 10,
+      p_search text default '',
+      p_mode text default 'all',
+      p_trash boolean default false,
+      p_filters jsonb default '{}'::jsonb
+    ) returns jsonb language plpgsql as $$
+    declare
+      v_filters jsonb := p_filters;
+    begin
+      perform 1
+      from public.articles as article
+      where (
+        coalesce(v_filters->>'profileId', 'all') = 'all'
+        or article.assigned_to::text = v_filters->>'profileId'
+      );
+      return '{}'::jsonb;
+    end;
+    $$;
+  `);
+  await db.exec(migration);
+
+  const result = await db.query<{ definition: string }>(`
+    select pg_get_functiondef(
+      'public.list_dashboard_articles_page(integer,integer,text,text,boolean,jsonb)'::regprocedure::oid
+    ) as definition
+  `);
+  assert.match(result.rows[0]?.definition || '', /from public\.article_access as access_row/);
+  await db.close();
 });
 
 test('dashboard header actions share one size contract and data tools leave the header', async () => {

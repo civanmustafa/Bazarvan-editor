@@ -42,14 +42,15 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-134/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-134/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-135/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-135/);
   assert.match(guide, /20261006000000_article_work_readiness_orchestration\.sql/);
   assert.match(guide, /20261007000000_finish_focused_article_first\.sql/);
   assert.match(guide, /20261008000000_complete_satisfied_competitor_preparation\.sql/);
   assert.match(guide, /20261009000000_unify_automation_master_and_truthful_queue_inventory\.sql/);
   assert.match(guide, /20261010000000_classify_cancelled_writing_inventory\.sql/);
   assert.match(guide, /20261012000000_truthful_gemini_attempt_budget\.sql/);
+  assert.match(guide, /20261012010000_complete_dashboard_user_filter\.sql/);
   assert.match(guide, /20261011000000_visible_automatic_recovery_schedule\.sql/);
   assert.match(guide, /20261003000000_automation_inventory_completion_and_auto_recovery\.sql/);
   assert.match(guide, /20261002000000_visible_automation_task_inventory\.sql/);
