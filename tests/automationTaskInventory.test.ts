@@ -137,6 +137,10 @@ test('automation task inventory is access-scoped and ranks running work first pe
       '../supabase/migrations/20261009000000_unify_automation_master_and_truthful_queue_inventory.sql',
       import.meta.url,
     ), 'utf8'));
+    await db.exec(await readFile(new URL(
+      '../supabase/migrations/20261010000000_classify_cancelled_writing_inventory.sql',
+      import.meta.url,
+    ), 'utf8'));
 
     const articleOne = '10000000-0000-4000-8000-000000000001';
     const articleTwo = '10000000-0000-4000-8000-000000000002';
@@ -235,6 +239,31 @@ test('automation task inventory is access-scoped and ranks running work first pe
       [recoverableWriting],
     )).rows[0];
     assert.deepEqual(recoveredWriting, { status: 'ready', recovery_count: 1 });
+
+    const supersededArticle = '10000000-0000-4000-8000-000000000004';
+    const supersededWriting = '30000000-0000-4000-8000-000000000004';
+    await db.query(`insert into articles(id,title,created_by,status)
+      values($1,'Superseded manual writing',$2,'draft')`, [supersededArticle, owner]);
+    await db.query(`insert into article_competitors(article_id,status,content_text) values
+      ($1,'completed','First competitor text'),($1,'completed','Second competitor text')`, [supersededArticle]);
+    await db.query(`insert into content_writing_automation_items(
+      id,article_id,requested_by,status,last_error_code,last_error,ready_at,eligible_at,completed_at
+    ) values($1,$2,$3,'cancelled','superseded_by_explicit_manual',
+      'Automatic writing was superseded by an explicit article-writing request.',now(),now(),now())`, [
+      supersededWriting, supersededArticle, owner,
+    ]);
+    await db.query(`insert into article_automation_stage_states(
+      article_id,stage,status,source_type,source_id,last_error
+    ) values($1,'content_writing_preparation','waiting_for_prerequisites',null,null,
+      'Automatic writing was superseded by an explicit article-writing request.')`, [
+      supersededArticle,
+    ]);
+    const supersededTask = (await db.query<any>(
+      'select public.get_visible_automation_task_inventory($1) inventory', [owner],
+    )).rows[0].inventory.find((task: any) => task.articleId === supersededArticle);
+    assert.equal(supersededTask.status, 'unscheduled');
+    assert.equal(supersededTask.reasonCode, 'superseded_by_manual_request');
+    assert.equal(supersededTask.runnable, false);
 
     const privileges = (await db.query<any>(`select
       has_function_privilege('anon','public.get_visible_automation_task_inventory(uuid)','execute') anonymous,

@@ -216,6 +216,8 @@ const getTaskReasonLabel = (task: AutomationTaskInventoryItem, isArabic: boolean
       `The article needs ${Math.max(0, task.minimumCompetitorCount - task.usableCompetitorCount)} more valid competitor(s) (${task.usableCompetitorCount}/${task.minimumCompetitorCount}).`,
     ],
     task_failed: ['فشلت آخر محاولة ولم تعد هناك جدولة فعالة.', 'The last attempt failed and no active schedule remains.'],
+    superseded_by_manual_request: ['أوقفت الكتابة التلقائية لأن طلب كتابة يدويًا حلّ محلها.', 'Automatic writing was stopped because an explicit manual writing request replaced it.'],
+    task_cancelled: ['ألغيت مهمة الكتابة التلقائية ولا توجد لها جدولة نشطة.', 'The automatic writing task was cancelled and has no active schedule.'],
   };
   if (known[reasonCode]) return known[reasonCode][isArabic ? 0 : 1];
   const rawReason = String(task.reason || '').trim();
