@@ -141,6 +141,10 @@ test('automation task inventory is access-scoped and ranks running work first pe
       '../supabase/migrations/20261010000000_classify_cancelled_writing_inventory.sql',
       import.meta.url,
     ), 'utf8'));
+    await db.exec(await readFile(new URL(
+      '../supabase/migrations/20261011000000_visible_automatic_recovery_schedule.sql',
+      import.meta.url,
+    ), 'utf8'));
 
     const articleOne = '10000000-0000-4000-8000-000000000001';
     const articleTwo = '10000000-0000-4000-8000-000000000002';
@@ -208,14 +212,18 @@ test('automation task inventory is access-scoped and ranks running work first pe
     assert.equal(completedRows.some((task: any) => task.operationKey === 'competitor_extraction'), false);
 
     const recoverableJob = '20000000-0000-4000-8000-000000000002';
+    const futureRecoverableJob = '20000000-0000-4000-8000-000000000003';
     const recoverableWriting = '30000000-0000-4000-8000-000000000001';
     await db.query(`insert into ai_external_analysis_jobs(
       id,article_id,job_type,status,last_error_code,last_error,completed_at
-    ) values($1,$2,'competitor_extraction','failed','provider_503','Temporary provider outage',now()-interval '2 hours')`, [
-      recoverableJob, articleOne,
+    ) values
+      ($1,$2,'competitor_extraction','failed','provider_503','Temporary provider outage',now()-interval '2 hours'),
+      ($3,$2,'competitor_discovery','failed','provider_503','Temporary provider outage',now()-interval '30 minutes')`, [
+      recoverableJob, articleOne, futureRecoverableJob,
     ]);
     await db.query(`insert into ai_external_analysis_runs(job_id,error_code,error_message)
-      values($1,'provider_503','Temporary provider outage')`, [recoverableJob]);
+      values($1,'provider_503','Temporary provider outage'),
+        ($2,'provider_503','Temporary provider outage')`, [recoverableJob, futureRecoverableJob]);
     await db.query(`insert into content_writing_automation_items(
       id,article_id,status,failure_class,last_error_code,last_error,ready_at,eligible_at,completed_at
     ) values($1,$2,'blocked','transient','provider_503','Temporary provider outage',now(),now(),now())`, [
@@ -223,6 +231,14 @@ test('automation task inventory is access-scoped and ranks running work first pe
     ]);
     await db.query(`update content_writing_automation_items
       set next_recovery_at=now()-interval '1 minute' where id=$1`, [recoverableWriting]);
+    const recoverySchedule = (await db.query<any>(
+      'select public.get_visible_automatic_recovery_schedule($1) schedule', [owner],
+    )).rows[0].schedule;
+    assert.equal(recoverySchedule.available, true);
+    assert.equal(recoverySchedule.checkIntervalSeconds, 60);
+    assert.equal(recoverySchedule.pendingCount, 3);
+    assert.equal(recoverySchedule.dueCount, 2);
+    assert.ok(Number.isFinite(Date.parse(recoverySchedule.nextRecoveryAt)));
     const recovered = (await db.query<any>(
       'select public.auto_requeue_recoverable_automation_failures(50) value',
     )).rows[0].value;
@@ -239,6 +255,19 @@ test('automation task inventory is access-scoped and ranks running work first pe
       [recoverableWriting],
     )).rows[0];
     assert.deepEqual(recoveredWriting, { status: 'ready', recovery_count: 1 });
+    const futureRecoverySchedule = (await db.query<any>(
+      'select public.get_visible_automatic_recovery_schedule($1) schedule', [owner],
+    )).rows[0].schedule;
+    assert.equal(futureRecoverySchedule.pendingCount, 1);
+    assert.equal(futureRecoverySchedule.dueCount, 0);
+    assert.ok(Date.parse(futureRecoverySchedule.nextRecoveryAt) > Date.now());
+    await db.query("update ai_external_analysis_jobs set status='cancelled' where id=$1", [futureRecoverableJob]);
+    const emptyRecoverySchedule = (await db.query<any>(
+      'select public.get_visible_automatic_recovery_schedule($1) schedule', [owner],
+    )).rows[0].schedule;
+    assert.equal(emptyRecoverySchedule.pendingCount, 0);
+    assert.equal(emptyRecoverySchedule.dueCount, 0);
+    assert.equal(emptyRecoverySchedule.nextRecoveryAt, null);
 
     const supersededArticle = '10000000-0000-4000-8000-000000000004';
     const supersededWriting = '30000000-0000-4000-8000-000000000004';
@@ -270,6 +299,11 @@ test('automation task inventory is access-scoped and ranks running work first pe
       has_function_privilege('authenticated','public.get_visible_automation_task_inventory(uuid)','execute') browser,
       has_function_privilege('service_role','public.get_visible_automation_task_inventory(uuid)','execute') worker`)).rows[0];
     assert.deepEqual(privileges, { anonymous: false, browser: false, worker: true });
+    const recoveryPrivileges = (await db.query<any>(`select
+      has_function_privilege('anon','public.get_visible_automatic_recovery_schedule(uuid)','execute') anonymous,
+      has_function_privilege('authenticated','public.get_visible_automatic_recovery_schedule(uuid)','execute') browser,
+      has_function_privilege('service_role','public.get_visible_automatic_recovery_schedule(uuid)','execute') worker`)).rows[0];
+    assert.deepEqual(recoveryPrivileges, { anonymous: false, browser: false, worker: true });
   } finally {
     await db.close();
   }

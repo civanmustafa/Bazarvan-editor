@@ -429,6 +429,32 @@ const readAutomationTaskInventory = async (
   });
 };
 
+const readAutomaticRecoverySchedule = async (userId: string): Promise<Record<string, unknown>> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .rpc('get_visible_automatic_recovery_schedule', { p_requested_by: userId });
+  if (error) {
+    if (isContentWritingAutomationSchemaUnavailableError(error)) {
+      return {
+        available: false,
+        enabled: true,
+        checkIntervalSeconds: 60,
+        pendingCount: 0,
+        dueCount: 0,
+        nextRecoveryAt: null,
+      };
+    }
+    throw error;
+  }
+  return isRecord(data) ? data : {
+    available: false,
+    enabled: true,
+    checkIntervalSeconds: 60,
+    pendingCount: 0,
+    dueCount: 0,
+    nextRecoveryAt: null,
+  };
+};
+
 const readArticleStatus = async (articleId: string) => {
   const supabase = getExternalAnalysisSupabaseAdmin();
   const [
@@ -664,9 +690,10 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
     const articleId = text(body.articleId);
     if (articleId) await requireArticleReadAccess(supabase, requireUuid(articleId, 'articleId'), principal.userId);
     const overview = await readOverview(principal.userId, body.draftOnly === true);
-    const [taskInventory, article] = await Promise.all([
+    const [taskInventory, article, automaticRecovery] = await Promise.all([
       readAutomationTaskInventory(principal.userId, overview),
       articleId ? readArticleStatus(articleId) : Promise.resolve(null),
+      readAutomaticRecoverySchedule(principal.userId),
     ]);
     return {
       status: 200,
@@ -675,6 +702,7 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
         overview,
         taskInventory,
         taskScope: principal.role === 'admin' ? 'system' : 'accessible',
+        automaticRecovery,
         article,
       },
     };

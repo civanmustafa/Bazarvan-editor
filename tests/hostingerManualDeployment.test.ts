@@ -42,18 +42,20 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-132/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-132/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-133/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-133/);
   assert.match(guide, /20261006000000_article_work_readiness_orchestration\.sql/);
   assert.match(guide, /20261007000000_finish_focused_article_first\.sql/);
   assert.match(guide, /20261008000000_complete_satisfied_competitor_preparation\.sql/);
   assert.match(guide, /20261009000000_unify_automation_master_and_truthful_queue_inventory\.sql/);
   assert.match(guide, /20261010000000_classify_cancelled_writing_inventory\.sql/);
+  assert.match(guide, /20261011000000_visible_automatic_recovery_schedule\.sql/);
   assert.match(guide, /20261003000000_automation_inventory_completion_and_auto_recovery\.sql/);
   assert.match(guide, /20261002000000_visible_automation_task_inventory\.sql/);
   assert.match(verifyScript, /AUTOMATION_TASK_INVENTORY_FUNCTION/);
   assert.match(verifyScript, /AUTOMATION_TASK_INVENTORY_PRIVILEGES/);
   assert.match(verifyScript, /AUTOMATION_SINGLE_MASTER_SCHEMA/);
+  assert.match(verifyScript, /AUTOMATION_RECOVERY_SCHEDULE/);
   assert.match(verifyScript, /UNIFIED_CLEANUP_FUNCTIONS/);
   assert.match(verifyScript, /UNIFIED_CLEANUP_CLIENT_PRIVILEGES/);
   assert.match(guide, /20260929000000_unified_duplicate_cleanup\.sql/);

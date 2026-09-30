@@ -29,6 +29,7 @@ export const CONTENT_WRITING_REQUIRED_MIGRATIONS = [
   '20261008000000_complete_satisfied_competitor_preparation.sql',
   '20261009000000_unify_automation_master_and_truthful_queue_inventory.sql',
   '20261010000000_classify_cancelled_writing_inventory.sql',
+  '20261011000000_visible_automatic_recovery_schedule.sql',
 ] as const;
 
 export const FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS = [

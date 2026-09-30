@@ -30,6 +30,7 @@ import {
   resumeAutomaticArticleFocus,
   retryRecoverableAutomationFailures,
   skipAutomaticArticleFocus,
+  type AutomaticRecoverySchedule,
   type AutomationTaskInventoryItem,
   type ContentWritingAutomationOverview,
 } from '../utils/contentWritingAutomation';
@@ -293,6 +294,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   const [overview, setOverview] = useState<ContentWritingAutomationOverview | null>(null);
   const [taskInventory, setTaskInventory] = useState<AutomationTaskInventoryItem[]>([]);
   const [taskScope, setTaskScope] = useState<'system' | 'accessible'>('accessible');
+  const [automaticRecovery, setAutomaticRecovery] = useState<AutomaticRecoverySchedule | null>(null);
   const [expandedOperationKey, setExpandedOperationKey] = useState<DashboardAutomationOperationKey | null>(null);
   const [effectivePreferences, setEffectivePreferences] = useState<UserAutomationPreferences | null>(null);
   const [preferencesError, setPreferencesError] = useState('');
@@ -340,6 +342,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         setOverview(statusResult.value.overview);
         setTaskInventory(statusResult.value.taskInventory);
         setTaskScope(statusResult.value.taskScope);
+        setAutomaticRecovery(statusResult.value.automaticRecovery);
         setError('');
       } else {
         setError(statusResult.reason instanceof Error ? statusResult.reason.message : String(statusResult.reason));
@@ -460,6 +463,11 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   const hasRunnableWritingTask = useMemo(() => taskInventory.some(task => (
     task.operationKey === 'content_writing' && task.runnable && task.status === 'ready'
   )), [taskInventory]);
+  const nextAutomaticRecoveryTime = automaticRecovery?.nextRecoveryAt
+    ? Date.parse(automaticRecovery.nextRecoveryAt)
+    : Number.NaN;
+  const nextAutomaticRecoveryIsValid = Number.isFinite(nextAutomaticRecoveryTime);
+  const automaticRecoveryDue = Boolean(automaticRecovery && automaticRecovery.dueCount > 0);
 
   const handleRefresh = () => {
     void refresh();
@@ -943,7 +951,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
           <span className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1 font-black text-emerald-600 dark:text-emerald-300">
               <RotateCcw size={10} />
-              {isArabic ? 'الاسترداد التلقائي مفعّل' : 'Automatic recovery enabled'}
+              {isArabic ? 'الاسترداد التلقائي مفعّل — فحص كل دقيقة' : 'Automatic recovery enabled — checked every minute'}
             </span>
             {isAdmin && (
               <button
@@ -963,6 +971,31 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
             >
               {isArabic ? 'إدارة الأتمتة' : 'Manage automation'}
             </button>
+          </span>
+        </div>
+        <div
+          data-automatic-recovery-schedule="true"
+          className={`mt-2 flex items-start gap-1.5 rounded-md px-2 py-1.5 text-[9px] font-bold leading-4 ${automaticRecoveryDue
+            ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
+            : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'}`}
+        >
+          <Clock3 size={11} className="mt-0.5 shrink-0" />
+          <span>
+            {!automaticRecovery?.available
+              ? (isArabic
+                ? 'جار التحقق من موعد الاسترداد التالي من قاعدة البيانات.'
+                : 'Checking the next recovery time from the database.')
+              : automaticRecoveryDue
+                ? (isArabic
+                  ? `الاسترداد مستحق الآن لـ ${automaticRecovery.dueCount} مهمة؛ سينفذه المحرك في دورة الفحص التالية خلال دقيقة.`
+                  : `Recovery is due now for ${automaticRecovery.dueCount} task(s); the engine will run it on the next check within one minute.`)
+                : automaticRecovery.pendingCount > 0 && nextAutomaticRecoveryIsValid
+                  ? (isArabic
+                    ? `الاسترداد التالي: ${new Date(nextAutomaticRecoveryTime).toLocaleString('ar')} (بعد ${formatCountdown(nextAutomaticRecoveryTime - now, true)}). تنتظر ${automaticRecovery.pendingCount} مهمة.`
+                    : `Next recovery: ${new Date(nextAutomaticRecoveryTime).toLocaleString('en')} (in ${formatCountdown(nextAutomaticRecoveryTime - now, false)}). ${automaticRecovery.pendingCount} task(s) are waiting.`)
+                  : (isArabic
+                    ? 'لا توجد مهمة فاشلة تنتظر موعد الاسترداد حاليًا؛ يعيد المحرك الفحص كل دقيقة.'
+                    : 'No failed task is currently waiting for recovery; the engine checks again every minute.')}
           </span>
         </div>
         {recoveryMessage && (

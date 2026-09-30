@@ -124,6 +124,15 @@ export type ContentWritingAutomationOverview = {
   candidates: ContentWritingAutomationCandidate[];
 };
 
+export type AutomaticRecoverySchedule = {
+  available: boolean;
+  enabled: boolean;
+  checkIntervalSeconds: number;
+  pendingCount: number;
+  dueCount: number;
+  nextRecoveryAt: string | null;
+};
+
 export type AutomationTaskStatus = 'running' | 'scheduled' | 'ready' | 'unscheduled' | 'failed';
 
 export type AutomationTaskInventoryItem = {
@@ -158,6 +167,7 @@ export type ContentWritingAutomationStatus = {
   overview: ContentWritingAutomationOverview;
   taskInventory: AutomationTaskInventoryItem[];
   taskScope: 'system' | 'accessible';
+  automaticRecovery: AutomaticRecoverySchedule;
   article: {
     readiness: ContentWritingAutomationReadiness | null;
     item: ContentWritingAutomationItem | null;
@@ -169,6 +179,18 @@ export type ContentWritingAutomationStatus = {
     } | null;
     hasCompletedContentWritingSession: boolean;
   } | null;
+};
+
+const normalizeAutomaticRecoverySchedule = (value: unknown): AutomaticRecoverySchedule => {
+  const source = isRecord(value) ? value : {};
+  return {
+    available: source.available === true,
+    enabled: source.enabled !== false,
+    checkIntervalSeconds: Math.max(1, integer(source.checkIntervalSeconds, 60)),
+    pendingCount: Math.max(0, integer(source.pendingCount)),
+    dueCount: Math.max(0, integer(source.dueCount)),
+    nextRecoveryAt: nullableText(source.nextRecoveryAt),
+  };
 };
 
 export type ContentWritingArticleSummaryState =
@@ -453,6 +475,7 @@ export const loadContentWritingAutomationStatus = async (
     overview: normalizeOverview(payload.overview),
     taskInventory: normalizeTaskInventory(payload.taskInventory),
     taskScope: payload.taskScope === 'system' ? 'system' : 'accessible',
+    automaticRecovery: normalizeAutomaticRecoverySchedule(payload.automaticRecovery),
     article: article ? {
       readiness: normalizeReadiness(article.readiness),
       item: normalizeItem(article.item),

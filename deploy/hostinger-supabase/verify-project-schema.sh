@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-132}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-133}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-67}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -114,6 +114,7 @@ readonly AUTOMATION_COORDINATOR_PRIVILEGES="$(sql_scalar "select not has_functio
 readonly AUTOMATION_TASK_INVENTORY_FUNCTION="$(sql_scalar "select to_regprocedure('public.get_visible_automation_task_inventory(uuid)') is not null and to_regprocedure('public.get_visible_automation_task_inventory_raw(uuid)') is not null")"
 readonly AUTOMATION_TASK_INVENTORY_PRIVILEGES="$(sql_scalar "select not has_function_privilege('anon', 'public.get_visible_automation_task_inventory(uuid)', 'execute') and not has_function_privilege('authenticated', 'public.get_visible_automation_task_inventory(uuid)', 'execute') and has_function_privilege('service_role', 'public.get_visible_automation_task_inventory(uuid)', 'execute')")"
 readonly AUTOMATION_SINGLE_MASTER_SCHEMA="$(sql_scalar "select position('article-automation-master-engine' in pg_get_functiondef('public.auto_requeue_recoverable_automation_failures(integer)'::regprocedure)) > 0 and position('reasonCode' in pg_get_functiondef('public.get_visible_automation_task_inventory(uuid)'::regprocedure)) > 0")"
+readonly AUTOMATION_RECOVERY_SCHEDULE="$(sql_scalar "select to_regprocedure('public.get_visible_automatic_recovery_schedule(uuid)') is not null and not has_function_privilege('anon', 'public.get_visible_automatic_recovery_schedule(uuid)', 'execute') and not has_function_privilege('authenticated', 'public.get_visible_automatic_recovery_schedule(uuid)', 'execute') and has_function_privilege('service_role', 'public.get_visible_automatic_recovery_schedule(uuid)', 'execute')")"
 readonly EXTERNAL_DEPENDENCY_CHILD_GUARD="$(sql_scalar "select exists(select 1 from pg_trigger where tgname = 'enforce_external_analysis_dependency_on_child' and not tgisinternal) and to_regprocedure('public.enforce_external_analysis_dependency_on_child()') is not null")"
 readonly EXTERNAL_DEPENDENCY_CHILD_GUARD_PRIVILEGES="$(sql_scalar "select not has_function_privilege('anon', 'public.enforce_external_analysis_dependency_on_child()', 'execute') and not has_function_privilege('authenticated', 'public.enforce_external_analysis_dependency_on_child()', 'execute') and has_function_privilege('service_role', 'public.enforce_external_analysis_dependency_on_child()', 'execute')")"
 
@@ -193,6 +194,7 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${AUTOMATION_TASK_INVENTORY_FUNCTION}" == "t" ]] || fail "Permission-aware automation task inventory function is missing."
 [[ "${AUTOMATION_TASK_INVENTORY_PRIVILEGES}" == "t" ]] || fail "Automation task inventory privileges are unsafe or incomplete."
 [[ "${AUTOMATION_SINGLE_MASTER_SCHEMA}" == "t" ]] || fail "Single-master automation or truthful queue reasons are missing."
+[[ "${AUTOMATION_RECOVERY_SCHEDULE}" == "t" ]] || fail "Permission-aware automatic recovery schedule is missing or unsafe."
 [[ "${EXTERNAL_DEPENDENCY_CHILD_GUARD}" == "t" ]] || fail "Child-side terminal dependency guard is missing."
 [[ "${EXTERNAL_DEPENDENCY_CHILD_GUARD_PRIVILEGES}" == "t" ]] || fail "Child-side terminal dependency guard has unsafe browser privileges."
 
