@@ -7,6 +7,24 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+test('Gemini execution budget is separate from worker runs and recovery cycles', async () => {
+  const [migration, worker, panel] = await Promise.all([
+    readFile(path.join(root, 'supabase', 'migrations', '20261012000000_truthful_gemini_attempt_budget.sql'), 'utf8'),
+    readFile(path.join(root, 'server', 'externalAnalysisWorker.ts'), 'utf8'),
+    readFile(path.join(root, 'components', 'AutomaticContentWritingQueuePanel.tsx'), 'utf8'),
+  ]);
+
+  assert.match(migration, /provider_attempt_count integer not null default 0/);
+  assert.match(migration, /provider_attempt_limit integer not null default 6/);
+  assert.match(migration, /recovery_cycle_limit integer not null default 3/);
+  assert.match(migration, /provider_status <> '499'/);
+  assert.match(migration, /providerAttemptObserved/);
+  assert.match(migration, /new\.max_attempts := greatest\(1, new\.attempt_count \+ 1\)/);
+  assert.doesNotMatch(worker, /job\.retry_count >= maximumRetryCount/);
+  assert.match(panel, /طلبات Gemini الفعلية/);
+  assert.match(panel, /دورة الاسترداد/);
+});
+
 test('automation recovery migration distinguishes transient failures and bounds delayed recovery', async () => {
   const migration = await readFile(
     path.join(root, 'supabase', 'migrations', '20260921000000_automation_retry_recovery.sql'),

@@ -96,6 +96,9 @@ export type AutomaticArticleFocus = {
   nextRetryAt: string | null;
   attemptCount: number;
   maxAttempts: number;
+  attemptMetric?: 'gemini_execution' | 'writing_execution' | 'worker_execution';
+  recoveryCount?: number;
+  maxRecoveries?: number;
   lastErrorCode: string | null;
   lastError: string | null;
   generation: number;
@@ -154,6 +157,7 @@ export type AutomationTaskInventoryItem = {
   reason: string | null;
   attemptCount: number;
   maxAttempts: number;
+  attemptMetric?: 'gemini_execution' | 'writing_execution' | 'worker_execution';
   missingFields: string[];
   usableCompetitorCount: number;
   minimumCompetitorCount: number;
@@ -370,6 +374,11 @@ const normalizeOverview = (value: unknown): ContentWritingAutomationOverview => 
       nextRetryAt: nullableText(focus.nextRetryAt),
       attemptCount: integer(focus.attemptCount),
       maxAttempts: integer(focus.maxAttempts),
+      attemptMetric: ['gemini_execution', 'writing_execution'].includes(text(focus.attemptMetric))
+        ? text(focus.attemptMetric) as AutomaticArticleFocus['attemptMetric']
+        : 'worker_execution',
+      recoveryCount: Math.max(0, integer(focus.recoveryCount)),
+      maxRecoveries: Math.max(0, integer(focus.maxRecoveries, 3)),
       lastErrorCode: nullableText(focus.lastErrorCode),
       lastError: nullableText(focus.lastError),
       generation: integer(focus.generation),
@@ -429,6 +438,9 @@ const normalizeTaskInventory = (value: unknown): AutomationTaskInventoryItem[] =
       reason: nullableText(entry.reason),
       attemptCount: integer(entry.attemptCount),
       maxAttempts: Math.max(1, integer(entry.maxAttempts, 1)),
+      attemptMetric: ['gemini_execution', 'writing_execution'].includes(text(entry.attemptMetric))
+        ? text(entry.attemptMetric) as AutomationTaskInventoryItem['attemptMetric']
+        : 'worker_execution',
       missingFields: Array.isArray(entry.missingFields)
         ? entry.missingFields.map(text).filter(Boolean)
         : [],

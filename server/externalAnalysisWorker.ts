@@ -17,7 +17,6 @@ import {
   cancelExternalEngineeringBundle,
   claimNextExternalAnalysisJob,
   completeExternalAnalysisJob,
-  deadLetterExternalAnalysisJob,
   finalizeExternalAnalysisJobCancel,
   heartbeatExternalAnalysisJob,
   getExternalAnalysisSupabaseAdmin,
@@ -77,12 +76,6 @@ const retryDelayMinutes = parseBoundedInteger(
   30,
   1,
   1_440,
-);
-const maximumRetryCount = parseBoundedInteger(
-  process.env.EXTERNAL_ANALYSIS_MAX_RETRY_COUNT,
-  5,
-  1,
-  50,
 );
 const workerConcurrency = parseBoundedInteger(
   process.env.EXTERNAL_ANALYSIS_WORKER_CONCURRENCY,
@@ -354,19 +347,6 @@ const executeClaimedJob = async (
 
     const retry = retryDetails(error);
     try {
-      if (job.retry_count >= maximumRetryCount) {
-        await deadLetterExternalAnalysisJob({
-          jobId: job.id,
-          workerId: slotWorkerId,
-          errorCode: 'external_analysis_retry_limit_reached',
-          errorMessage: `Automatic retry limit (${maximumRetryCount}) reached. Last error: ${retry.message}`.slice(0, 2_000),
-          progress: retry.progress,
-        });
-        console.error(
-          `[external-analysis-worker] Stopped job ${job.id} (${job.job_type}) after ${job.retry_count} automatic retries; reason=${retry.code}.`,
-        );
-        return;
-      }
       const administratorRetryMinutes = await readAiJobRetryMinutes()
         .catch(() => retry.delayMinutes);
       const scheduled = await scheduleExternalAnalysisJobRetry({
@@ -431,7 +411,7 @@ const queueWorker = new AdaptiveQueueWorker<ExternalAnalysisJob>({
 
 const runWorker = async (): Promise<void> => {
   console.log(
-    `[external-analysis-worker] Started ${workerId}; jobTypes=${workerJobTypes.join(',') || 'none'}; automationMaster=${automationMasterEnabled ? 'enabled' : 'disabled'}; concurrency=${workerConcurrency}, idlePoll=${pollIntervalMs}-${maximumIdlePollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m, maxRetries=${maximumRetryCount} (global setting takes precedence).`,
+    `[external-analysis-worker] Started ${workerId}; jobTypes=${workerJobTypes.join(',') || 'none'}; automationMaster=${automationMasterEnabled ? 'enabled' : 'disabled'}; concurrency=${workerConcurrency}, idlePoll=${pollIntervalMs}-${maximumIdlePollIntervalMs}ms, lease=${leaseSeconds}s, retryFallback=${retryDelayMinutes}m; durable provider and recovery budgets are enforced by the queue.`,
   );
 
   const unsubscribeWakeSignal: () => void = workerJobTypes.length > 0

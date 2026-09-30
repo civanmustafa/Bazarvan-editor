@@ -249,18 +249,20 @@ test('background saves preserve generated semantic and brief fields under one ro
   assert.match(wrapper, /return public\.save_article_snapshot\([\s\S]*v_snapshot/);
 });
 
-test('worker treats review blocks, dead letters, and ownership loss as distinct terminal paths', async () => {
-  const [worker, queue, executor] = await Promise.all([
+test('worker and durable queue treat review blocks, provider-budget dead letters, and ownership loss as distinct terminal paths', async () => {
+  const [worker, queue, executor, budgetMigration] = await Promise.all([
     readWorkspaceFile('server/externalAnalysisWorker.ts'),
     readWorkspaceFile('server/externalAnalysisQueue.ts'),
     readWorkspaceFile('server/externalAnalysisExecutor.ts'),
+    readWorkspaceFile('supabase/migrations/20261012000000_truthful_gemini_attempt_budget.sql'),
   ]);
   assert.match(executor, /class ExternalAnalysisBlockedError/);
   assert.match(executor, /class ExternalAnalysisOwnershipLostError/);
   assert.match(worker, /error instanceof ExternalAnalysisOwnershipLostError/);
   assert.match(worker, /error instanceof ExternalAnalysisBlockedError/);
   assert.match(worker, /blockExternalAnalysisJob/);
-  assert.match(worker, /deadLetterExternalAnalysisJob/);
+  assert.match(budgetMigration, /external_analysis_provider_attempt_limit_reached/);
+  assert.match(budgetMigration, /new\.status := 'blocked'/);
   assert.match(queue, /block_external_analysis_job/);
   assert.match(queue, /dead_letter_external_analysis_job/);
 });

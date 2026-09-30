@@ -64,6 +64,7 @@ test('full workflow is durable, ordered, cancellable, and applies only a reviewe
     editorContext,
     supabaseArticles,
     externalAnalysisErrors,
+    budgetMigration,
   ] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20260728030000_full_article_pipeline.sql'),
     readWorkspaceFile('supabase/migrations/20260824010000_full_article_pipeline_safety.sql'),
@@ -77,6 +78,7 @@ test('full workflow is durable, ordered, cancellable, and applies only a reviewe
     readWorkspaceFile('contexts/EditorContext.tsx'),
     readWorkspaceFile('utils/supabaseArticles.ts'),
     readWorkspaceFile('utils/externalAnalysisErrors.ts'),
+    readWorkspaceFile('supabase/migrations/20261012000000_truthful_gemini_attempt_budget.sql'),
   ]);
 
   for (const jobType of ['content_brief_generation', 'full_article_pipeline']) {
@@ -120,8 +122,8 @@ test('full workflow is durable, ordered, cancellable, and applies only a reviewe
   assert.match(briefExecutor, /generatedBrief: briefText/);
   assert.match(worker, /readAiJobRetryMinutes/);
   assert.match(worker, /administratorRetryMinutes/);
-  assert.match(worker, /EXTERNAL_ANALYSIS_MAX_RETRY_COUNT/);
-  assert.match(worker, /external_analysis_retry_limit_reached/);
+  assert.match(budgetMigration, /provider_attempt_limit integer not null default 6/);
+  assert.match(budgetMigration, /external_analysis_provider_attempt_limit_reached/);
   assert.match(ecosystem, /name: 'bazarvan-full-article-pipeline-worker'/);
   assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'full_article_pipeline'/);
   assert.match(ecosystem, /semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command/);

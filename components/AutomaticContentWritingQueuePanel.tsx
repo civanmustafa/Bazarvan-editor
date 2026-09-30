@@ -186,6 +186,28 @@ const getTaskStatusLabel = (task: AutomationTaskInventoryItem, isArabic: boolean
   })[task.status];
 };
 
+const getAttemptLabel = (
+  attemptCount: number,
+  maxAttempts: number,
+  attemptMetric: AutomationTaskInventoryItem['attemptMetric'] | undefined,
+  isArabic: boolean,
+): string => {
+  const maximum = Math.max(maxAttempts, attemptCount);
+  if (attemptMetric === 'gemini_execution') {
+    return isArabic
+      ? `طلبات Gemini الفعلية: ${attemptCount}/${maximum}`
+      : `Actual Gemini executions: ${attemptCount}/${maximum}`;
+  }
+  if (attemptMetric === 'writing_execution') {
+    return isArabic
+      ? `محاولات الكتابة: ${attemptCount}/${maximum}`
+      : `Writing attempts: ${attemptCount}/${maximum}`;
+  }
+  return isArabic
+    ? `تشغيلات العامل: ${attemptCount}/${maximum}`
+    : `Worker runs: ${attemptCount}/${maximum}`;
+};
+
 const getTaskReasonLabel = (task: AutomationTaskInventoryItem, isArabic: boolean): string => {
   const reasonCode = String(task.reasonCode || '').trim();
   const known: Record<string, [string, string]> = {
@@ -608,7 +630,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         )}
         {operation.attemptCount !== undefined && operation.maxAttempts !== undefined && (
           <span className="mt-1.5 block text-[9px] font-bold text-gray-500 dark:text-gray-400">
-            {isArabic ? `المحاولة ${operation.attemptCount}/${operation.maxAttempts}` : `Attempt ${operation.attemptCount}/${operation.maxAttempts}`}
+            {getAttemptLabel(operation.attemptCount, operation.maxAttempts, operation.tasks?.[0]?.attemptMetric, isArabic)}
           </span>
         )}
         {operation.retryScheduled && operation.retryAt && (
@@ -759,7 +781,10 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] font-bold text-gray-500 dark:text-gray-400">
                 <span>{isArabic ? 'المرحلة:' : 'Stage:'} {getFocusStageLabel(overview.focus.currentStage, isArabic)}</span>
                 {overview.focus.attemptCount > 0 && (
-                  <span>{isArabic ? 'المحاولة' : 'Attempt'} {overview.focus.attemptCount}/{Math.max(overview.focus.maxAttempts, overview.focus.attemptCount)}</span>
+                  <span>{getAttemptLabel(overview.focus.attemptCount, overview.focus.maxAttempts, overview.focus.attemptMetric, isArabic)}</span>
+                )}
+                {(overview.focus.recoveryCount || 0) > 0 && (
+                  <span>{isArabic ? 'دورة الاسترداد' : 'Recovery cycle'} {overview.focus.recoveryCount}/{overview.focus.maxRecoveries || 3}</span>
                 )}
                 {overview.focus.acquiredAt && Number.isFinite(Date.parse(overview.focus.acquiredAt)) && (
                   <span>{isArabic ? 'بدأت:' : 'Started:'} {new Date(overview.focus.acquiredAt).toLocaleString(isArabic ? 'ar' : 'en')}</span>
@@ -932,7 +957,12 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                           )}
                           {(task.attemptCount > 0 || task.status === 'failed') && (
                             <span className="mt-1 block text-[9px] font-bold text-gray-400 dark:text-gray-500">
-                              {isArabic ? `المحاولة ${task.attemptCount}/${task.maxAttempts}` : `Attempt ${task.attemptCount}/${task.maxAttempts}`}
+                              {getAttemptLabel(task.attemptCount, task.maxAttempts, task.attemptMetric, isArabic)}
+                            </span>
+                          )}
+                          {task.recoveryCount > 0 && (
+                            <span className="mt-1 block text-[9px] font-bold text-amber-600 dark:text-amber-300">
+                              {isArabic ? 'دورة الاسترداد' : 'Recovery cycle'} {task.recoveryCount}/{task.maxRecoveries || 3}
                             </span>
                           )}
                         </span>

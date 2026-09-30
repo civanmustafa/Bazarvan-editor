@@ -1325,6 +1325,7 @@ const Dashboard: React.FC = () => {
   const [articlePagesByStatus, setArticlePagesByStatus] = useState<DashboardStatusPages>(() => (
     createDashboardStatusPages(initialDashboardLocation.status, initialDashboardLocation.page)
   ));
+  const [articlesPageSize, setArticlesPageSize] = useState(DASHBOARD_ARTICLES_PAGE_SIZE);
   const [articlesTotalCount, setArticlesTotalCount] = useState(0);
   const [articlesHasNextPage, setArticlesHasNextPage] = useState(false);
   const [isArticlesPageFromCache, setIsArticlesPageFromCache] = useState(false);
@@ -1419,7 +1420,7 @@ const Dashboard: React.FC = () => {
   );
   const articlesPageOptions = useMemo<RemoteArticlesPageOptions>(() => ({
     page: articlesPage,
-    pageSize: DASHBOARD_ARTICLES_PAGE_SIZE,
+    pageSize: articlesPageSize,
     search: debouncedSearchQuery,
     mode: 'all',
     trash: isTrashVisible,
@@ -1427,7 +1428,7 @@ const Dashboard: React.FC = () => {
       ...filters,
       status: isTrashVisible ? 'all' : articleStatusTab,
     },
-  }), [articleStatusTab, articlesPage, debouncedSearchQuery, isTrashVisible, filters]);
+  }), [articleStatusTab, articlesPage, articlesPageSize, debouncedSearchQuery, isTrashVisible, filters]);
   const articlesPageQueryKey = useMemo(
     () => JSON.stringify(articlesPageOptions),
     [articlesPageOptions],
@@ -2007,7 +2008,7 @@ const Dashboard: React.FC = () => {
       return;
     }
     setArticlePagesByStatus(createDashboardStatusPages());
-  }, [isTrashVisible, searchQuery, filters]);
+  }, [isTrashVisible, searchQuery, filters, articlesPageSize]);
 
   const handleChooseNewArticleLanguage = (lang: 'ar' | 'en') => {
     setIsNewArticleLanguageModalOpen(false);
@@ -2017,6 +2018,9 @@ const Dashboard: React.FC = () => {
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFilters(prev => ({ ...prev, [name]: value }));
+    if (name === 'profileId' && value !== 'all') {
+      setArticleStatusTab('all');
+    }
   };
 
   const handleArticleStatusTabChange = (status: ArticleStatusFilter) => {
@@ -2063,9 +2067,26 @@ const Dashboard: React.FC = () => {
   const selectedFilteredArticles = useMemo(() => (
     filteredArticles.filter(article => selectedArticleIds.has(article.id))
   ), [filteredArticles, selectedArticleIds]);
-  const articlesTotalPages = Math.max(1, Math.ceil(articlesTotalCount / DASHBOARD_ARTICLES_PAGE_SIZE));
+  const articlesTotalPages = Math.max(1, Math.ceil(articlesTotalCount / articlesPageSize));
   const articlesTotalLabel = String(articlesTotalCount);
   const articlesPageLabel = `صفحة ${articlesPage} / ${articlesTotalPages}`;
+  const activeArticleFilterLabels = [
+    `الحالة: ${isTrashVisible ? 'سلة المهملات' : (articleStatusTab === 'all' ? 'كل المقالات' : getArticleStatusLabel(articleStatusTab, 'ar'))}`,
+    filters.profileId !== 'all'
+      ? `المستخدم: ${selectedFilterProfile ? getProfileLabel(selectedFilterProfile) : filters.profileId}`
+      : '',
+    debouncedSearchQuery ? `البحث: ${debouncedSearchQuery}` : '',
+    filters.language !== 'all' ? `اللغة: ${filters.language === 'ar' ? 'العربية' : 'الإنجليزية'}` : '',
+    filters.visibility !== 'all' ? `الظهور: ${filters.visibility}` : '',
+    filters.source !== 'all' ? `المصدر: ${filters.source}` : '',
+    filters.company !== 'all' ? `الشركة: ${filters.company}` : '',
+    filters.pageType !== 'all' ? `نوع الصفحة: ${filters.pageType}` : '',
+    filters.audienceScope !== 'all' ? `النطاق: ${filters.audienceScope}` : '',
+    filters.dateFrom || filters.dateTo ? `آخر حفظ: ${filters.dateFrom || 'البداية'} — ${filters.dateTo || 'اليوم'}` : '',
+    filters.createdFrom || filters.createdTo ? `الإنشاء: ${filters.createdFrom || 'البداية'} — ${filters.createdTo || 'اليوم'}` : '',
+    filters.wordCountMin || filters.wordCountMax ? `الكلمات: ${filters.wordCountMin || '0'} — ${filters.wordCountMax || '∞'}` : '',
+    filters.timeMin || filters.timeMax ? `الوقت: ${filters.timeMin || '0'} — ${filters.timeMax || '∞'} دقيقة` : '',
+  ].filter(Boolean);
   const canGoToPreviousArticlesPage = articlesPage > 1 && !isArticlesLoading;
   const canGoToNextArticlesPage = articlesHasNextPage && !isArticlesLoading;
   const areAllFilteredSelected = filteredArticles.length > 0 && filteredArticles.every(article => selectedArticleIds.has(article.id));
@@ -2435,22 +2456,45 @@ const Dashboard: React.FC = () => {
                     </div>
                 )}
 
-                <div className="mb-3 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A] sm:flex-row sm:items-center sm:justify-between">
-                    <div className="font-bold text-gray-600 dark:text-gray-300">
-                        عرض {filteredArticles.length} من أصل {articlesTotalLabel} مقالة، 10 مقالات في كل صفحة
+                <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                    <div className="mb-2 flex flex-wrap gap-1.5" aria-label="الفلاتر النشطة">
+                      {activeArticleFilterLabels.map(label => (
+                        <span key={label} className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-black text-blue-700 dark:bg-blue-900/25 dark:text-blue-200">
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="font-bold text-gray-600 dark:text-gray-300">
+                        عرض {filteredArticles.length} في هذه الصفحة من أصل {articlesTotalLabel} نتيجة مطابقة
                         {isArticlesPageFromCache && (
                             <span className="ms-2 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-black text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-300">
                                 بيانات محفوظة مؤقتاً
                             </span>
                         )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="flex items-center gap-1.5 text-xs font-bold text-gray-500 dark:text-gray-400">
+                          <span>في الصفحة</span>
+                          <AppSelect
+                            value={String(articlesPageSize)}
+                            onChange={event => setArticlesPageSize(Number(event.target.value) || DASHBOARD_ARTICLES_PAGE_SIZE)}
+                            className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs font-black dark:border-[#444] dark:bg-[#1F1F1F]"
+                          >
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                          </AppSelect>
+                        </label>
+                        <ArticlePaginationControls
+                          pageLabel={articlesPageLabel}
+                          canGoPrevious={canGoToPreviousArticlesPage}
+                          canGoNext={canGoToNextArticlesPage}
+                          onPrevious={() => setArticlesPage(page => Math.max(1, page - 1))}
+                          onNext={() => setArticlesPage(page => page + 1)}
+                        />
+                      </div>
                     </div>
-                    <ArticlePaginationControls
-                      pageLabel={articlesPageLabel}
-                      canGoPrevious={canGoToPreviousArticlesPage}
-                      canGoNext={canGoToNextArticlesPage}
-                      onPrevious={() => setArticlesPage(page => Math.max(1, page - 1))}
-                      onNext={() => setArticlesPage(page => page + 1)}
-                    />
                 </div>
 
                 {filteredArticles.length > 0 ? (

@@ -211,6 +211,11 @@ const publicAutomaticArticleFocus = async (
     nextRetryAt: text(value.nextRetryAt) || null,
     attemptCount: Math.max(0, Number(value.attemptCount) || 0),
     maxAttempts: Math.max(0, Number(value.maxAttempts) || 0),
+    attemptMetric: ['gemini_execution', 'writing_execution'].includes(text(value.attemptMetric))
+      ? text(value.attemptMetric)
+      : 'worker_execution',
+    recoveryCount: Math.max(0, Number(value.recoveryCount) || 0),
+    maxRecoveries: Math.max(0, Number(value.maxRecoveries) || 3),
     lastErrorCode: articleVisible ? text(value.lastErrorCode) || null : null,
     lastError: articleVisible ? text(value.lastError) || null : null,
     generation: Math.max(0, Number(value.generation) || 0),

@@ -7,6 +7,16 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readWorkspaceFile = (relativePath: string) => readFile(path.join(root, relativePath), 'utf8');
 
+test('dashboard user filtering exposes the full matching result set and page size', async () => {
+  const dashboard = await readWorkspaceFile('components/Dashboard.tsx');
+
+  assert.match(dashboard, /name === 'profileId' && value !== 'all'[\s\S]*setArticleStatusTab\('all'\)/);
+  assert.match(dashboard, /const \[articlesPageSize, setArticlesPageSize\]/);
+  assert.match(dashboard, /<option value="10">10<\/option>[\s\S]*<option value="25">25<\/option>[\s\S]*<option value="50">50<\/option>/);
+  assert.match(dashboard, /في هذه الصفحة من أصل \{articlesTotalLabel\} نتيجة مطابقة/);
+  assert.match(dashboard, /activeArticleFilterLabels/);
+});
+
 test('dashboard header actions share one size contract and data tools leave the header', async () => {
   const dashboard = await readWorkspaceFile('components/Dashboard.tsx');
 
