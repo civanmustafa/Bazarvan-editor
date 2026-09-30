@@ -461,6 +461,13 @@ const requestAutomation = async (
   return source;
 };
 
+export const loadAutomaticRecoverySchedule = async (
+  signal?: AbortSignal,
+): Promise<AutomaticRecoverySchedule> => {
+  const payload = await requestAutomation({ action: 'recovery_status' }, signal);
+  return normalizeAutomaticRecoverySchedule(payload.automaticRecovery);
+};
+
 export const loadContentWritingAutomationStatus = async (
   articleId?: string,
   options: { signal?: AbortSignal; draftOnly?: boolean } = {},

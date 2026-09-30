@@ -26,6 +26,7 @@ import type { UserAutomationPreferences } from '../constants/userAutomation';
 import { buildEditorArticlePath, navigateToAppPath } from '../utils/appRoutes';
 import {
   getContentWritingAutomationErrorMessage,
+  loadAutomaticRecoverySchedule,
   loadContentWritingAutomationStatus,
   resumeAutomaticArticleFocus,
   retryRecoverableAutomationFailures,
@@ -333,16 +334,19 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
     refreshRequestRef.current = requestId;
     if (!silent) setLoading(true);
     try {
+      const automaticRecoveryRequest = loadAutomaticRecoverySchedule().then(schedule => {
+        if (refreshRequestRef.current === requestId) setAutomaticRecovery(schedule);
+      });
       const [statusResult, preferencesResult] = await Promise.allSettled([
         loadContentWritingAutomationStatus(undefined, { draftOnly: true }),
         loadUserAutomationPreferences(),
       ]);
+      await Promise.allSettled([automaticRecoveryRequest]);
       if (refreshRequestRef.current !== requestId) return;
       if (statusResult.status === 'fulfilled') {
         setOverview(statusResult.value.overview);
         setTaskInventory(statusResult.value.taskInventory);
         setTaskScope(statusResult.value.taskScope);
-        setAutomaticRecovery(statusResult.value.automaticRecovery);
         setError('');
       } else {
         setError(statusResult.reason instanceof Error ? statusResult.reason.message : String(statusResult.reason));

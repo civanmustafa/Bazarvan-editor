@@ -57,6 +57,8 @@ test('the automation queue keeps every user-controlled operation visible in one 
   assert.match(component, /getOperationErrorMessage\(operation, isArabic\)/);
   assert.match(component, /إدارة الأتمتة/);
   assert.match(component, /loadContentWritingAutomationStatus\(undefined, \{ draftOnly: true \}\)/);
+  assert.match(component, /loadAutomaticRecoverySchedule\(\)/);
+  assert.match(API, /action === 'recovery_status'/);
   assert.match(queue, /status === 'draft'/);
   assert.match(API, /body\.draftOnly === true/);
   assert.match(inventoryMigration, /where evidence\.article_status = 'draft'/);

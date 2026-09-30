@@ -681,6 +681,21 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
     };
   }
 
+  if (action === 'recovery_status') {
+    consumeApiRateLimit(
+      'content-writing-automation:recovery-status',
+      principal.userId,
+      getPositiveIntegerEnv('CONTENT_WRITING_AUTOMATION_STATUS_RATE_LIMIT_PER_MINUTE', 180),
+    );
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        automaticRecovery: await readAutomaticRecoverySchedule(principal.userId),
+      },
+    };
+  }
+
   if (action === 'status') {
     consumeApiRateLimit(
       'content-writing-automation:status',
@@ -690,10 +705,9 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
     const articleId = text(body.articleId);
     if (articleId) await requireArticleReadAccess(supabase, requireUuid(articleId, 'articleId'), principal.userId);
     const overview = await readOverview(principal.userId, body.draftOnly === true);
-    const [taskInventory, article, automaticRecovery] = await Promise.all([
+    const [taskInventory, article] = await Promise.all([
       readAutomationTaskInventory(principal.userId, overview),
       articleId ? readArticleStatus(articleId) : Promise.resolve(null),
-      readAutomaticRecoverySchedule(principal.userId),
     ]);
     return {
       status: 200,
@@ -702,7 +716,6 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
         overview,
         taskInventory,
         taskScope: principal.role === 'admin' ? 'system' : 'accessible',
-        automaticRecovery,
         article,
       },
     };
