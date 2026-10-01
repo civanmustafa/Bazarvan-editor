@@ -145,6 +145,10 @@ test('automation task inventory is access-scoped and ranks running work first pe
       '../supabase/migrations/20261011000000_visible_automatic_recovery_schedule.sql',
       import.meta.url,
     ), 'utf8'));
+    await db.exec(await readFile(new URL(
+      '../supabase/migrations/20261013000000_optimize_automation_inventory_refresh.sql',
+      import.meta.url,
+    ), 'utf8'));
 
     const articleOne = '10000000-0000-4000-8000-000000000001';
     const articleTwo = '10000000-0000-4000-8000-000000000002';
@@ -183,6 +187,10 @@ test('automation task inventory is access-scoped and ranks running work first pe
     const adminRows = (await db.query<any>(
       'select public.get_visible_automation_task_inventory($1) inventory', [admin],
     )).rows[0].inventory;
+    const rawAdminRows = (await db.query<any>(
+      'select public.get_visible_automation_task_inventory_raw($1) inventory', [admin],
+    )).rows[0].inventory;
+    assert.ok(rawAdminRows.every((task: any) => task.articleId !== articleTwo));
     const semanticRows = adminRows.filter((task: any) => task.operationKey === 'alternative_keywords');
     assert.deepEqual(semanticRows.map((task: any) => task.articleId), [articleOne, articleThree]);
     assert.ok(adminRows.every((task: any) => task.articleStatus === 'draft'));

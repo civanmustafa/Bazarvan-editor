@@ -99,6 +99,11 @@ test('the automation queue keeps every user-controlled operation visible in one 
   ]);
 
   assert.match(component, /data-ai-automation-status="true"/);
+  assert.match(component, /data-automation-status-stale=/);
+  assert.match(component, /data-automation-refresh-warning="true"/);
+  assert.match(component, /البيانات الظاهرة هي آخر حالة ناجحة/);
+  assert.match(component, /ستتم إعادة المحاولة تلقائيًا خلال 30 ثانية/);
+  assert.doesNotMatch(component, /<span>\{getContentWritingAutomationErrorMessage\(error, isArabic\)\}<\/span>/);
   assert.match(component, /data-automation-operations-queue="true"/);
   assert.match(component, /حالة الذكاء الاصطناعي وطابور العمليات/);
   assert.match(component, /المهام الحية للذكاء الاصطناعي|DashboardAiExecutionMonitor/);

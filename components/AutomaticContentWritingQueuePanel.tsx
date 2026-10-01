@@ -323,6 +323,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   const [preferencesError, setPreferencesError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState<number | null>(null);
   const [recovering, setRecovering] = useState(false);
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [focusMutating, setFocusMutating] = useState(false);
@@ -369,6 +370,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         setOverview(statusResult.value.overview);
         setTaskInventory(statusResult.value.taskInventory);
         setTaskScope(statusResult.value.taskScope);
+        setLastSuccessfulRefreshAt(Date.now());
         setError('');
       } else {
         setError(statusResult.reason instanceof Error ? statusResult.reason.message : String(statusResult.reason));
@@ -659,6 +661,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
     <section
       data-ai-automation-status="true"
       data-automation-operations-queue="true"
+      data-automation-status-stale={error && overview ? 'true' : undefined}
       className="rounded-xl border border-blue-200 bg-white p-4 dark:border-blue-900/50 dark:bg-[#2A2A2A]"
       dir={isArabic ? 'rtl' : 'ltr'}
     >
@@ -1057,9 +1060,20 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
       )}
 
       {error && (
-        <div className="mt-2 flex items-start gap-1.5 text-[10px] font-bold text-red-600 dark:text-red-300">
+        <div
+          data-automation-refresh-warning="true"
+          className="mt-2 flex items-start gap-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[10px] font-bold leading-5 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+        >
           <AlertCircle size={12} className="mt-0.5 shrink-0" />
-          <span>{getContentWritingAutomationErrorMessage(error, isArabic)}</span>
+          <span>
+            {overview
+              ? (isArabic
+                ? `تعذر تحديث حالة الأتمتة الآن؛ البيانات الظاهرة هي آخر حالة ناجحة${lastSuccessfulRefreshAt ? ` عند ${new Date(lastSuccessfulRefreshAt).toLocaleString('ar')}` : ''} وقد تكون قديمة. ستتم إعادة المحاولة تلقائيًا خلال 30 ثانية.`
+                : `Automation status could not be refreshed. The visible data is the last successful state${lastSuccessfulRefreshAt ? ` from ${new Date(lastSuccessfulRefreshAt).toLocaleString('en')}` : ''} and may be stale. Another attempt will run automatically within 30 seconds.`)
+              : (isArabic
+                ? 'تعذر تحميل حالة الأتمتة الآن. ستتم إعادة المحاولة تلقائيًا خلال 30 ثانية.'
+                : 'Automation status could not be loaded. Another attempt will run automatically within 30 seconds.')}
+          </span>
         </div>
       )}
     </section>

@@ -31,6 +31,7 @@ export const CONTENT_WRITING_REQUIRED_MIGRATIONS = [
   '20261010000000_classify_cancelled_writing_inventory.sql',
   '20261011000000_visible_automatic_recovery_schedule.sql',
   '20261012000000_truthful_gemini_attempt_budget.sql',
+  '20261013000000_optimize_automation_inventory_refresh.sql',
 ] as const;
 
 export const FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS = [
