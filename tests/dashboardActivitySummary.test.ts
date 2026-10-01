@@ -63,6 +63,69 @@ test('dashboard user filter migration safely upgrades the existing RPC definitio
   await db.close();
 });
 
+test('dashboard search normalizes Arabic variants and Latin case within the active status tab', async () => {
+  const [dashboard, baseMigration, searchMigration] = await Promise.all([
+    readWorkspaceFile('components/Dashboard.tsx'),
+    readWorkspaceFile('supabase/migrations/20260713010000_phase_2_3_access_and_atomic_article_save.sql'),
+    readWorkspaceFile('supabase/migrations/20261015000000_normalize_dashboard_search.sql'),
+  ]);
+  const db = new PGlite();
+
+  await db.exec(`
+    create role authenticated;
+    create role anon;
+    create or replace function public.list_dashboard_articles_page(
+      p_page integer default 1,
+      p_page_size integer default 10,
+      p_search text default '',
+      p_mode text default 'all',
+      p_trash boolean default false,
+      p_filters jsonb default '{}'::jsonb
+    ) returns jsonb language plpgsql as $$
+    declare
+      v_search text := lower(btrim(coalesce(p_search, '')));
+    begin
+      if v_search = '' or position(v_search in lower(concat_ws(' ', 'sample'))) > 0 then
+        return jsonb_build_object('matched', true);
+      end if;
+      return jsonb_build_object('matched', false);
+    end;
+    $$;
+  `);
+  await db.exec(searchMigration);
+
+  const result = await db.query<{
+    arabic_forward: boolean;
+    arabic_reverse: boolean;
+    hamza_below: boolean;
+    latin_case: boolean;
+  }>(`
+    select
+      public.normalize_dashboard_search_text('أوروبية') = public.normalize_dashboard_search_text('اوروبية') as arabic_forward,
+      public.normalize_dashboard_search_text('اوروبية') = public.normalize_dashboard_search_text('أوروبية') as arabic_reverse,
+      public.normalize_dashboard_search_text('إنفعال') = public.normalize_dashboard_search_text('انفعال') as hamza_below,
+      public.normalize_dashboard_search_text('EUROPE') = public.normalize_dashboard_search_text('europe') as latin_case
+  `);
+
+  assert.deepEqual(result.rows[0], {
+    arabic_forward: true,
+    arabic_reverse: true,
+    hamza_below: true,
+    latin_case: true,
+  });
+  assert.match(dashboard, /status: isTrashVisible \? 'all' : articleStatusTab/);
+  assert.match(baseMigration, /coalesce\(v_filters->>'status', 'all'\) = 'all' or article\.status = v_filters->>'status'/);
+
+  const definition = await db.query<{ definition: string }>(`
+    select pg_get_functiondef(
+      'public.list_dashboard_articles_page(integer,integer,text,text,boolean,jsonb)'::regprocedure::oid
+    ) as definition
+  `);
+  assert.match(definition.rows[0]?.definition || '', /normalize_dashboard_search_text\(btrim\(p_search\)\)/);
+  assert.match(definition.rows[0]?.definition || '', /normalize_dashboard_search_text\(concat_ws/);
+  await db.close();
+});
+
 test('dashboard header actions share one size contract and data tools leave the header', async () => {
   const dashboard = await readWorkspaceFile('components/Dashboard.tsx');
 
