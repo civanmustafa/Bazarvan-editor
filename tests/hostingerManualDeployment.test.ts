@@ -43,9 +43,9 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-139/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-139/);
-  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=139/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-140/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-140/);
+  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=140/);
   assert.match(deployScript, /verify-project-schema\.sh/);
   assert.match(verifyScript, /get_visible_automation_task_inventory_v9/);
   assert.match(guide, /20261006000000_article_work_readiness_orchestration\.sql/);
@@ -59,6 +59,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20261014000000_finalize_unneeded_automatic_writing\.sql/);
   assert.match(guide, /20261014010000_clear_satisfied_writing_focus_pauses\.sql/);
   assert.match(guide, /20261015000000_normalize_dashboard_search\.sql/);
+  assert.match(guide, /20261016000000_release_trashed_article_automation\.sql/);
   assert.match(guide, /20261011000000_visible_automatic_recovery_schedule\.sql/);
   assert.match(guide, /20261003000000_automation_inventory_completion_and_auto_recovery\.sql/);
   assert.match(guide, /20261002000000_visible_automation_task_inventory\.sql/);
@@ -66,6 +67,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(verifyScript, /AUTOMATION_TASK_INVENTORY_PRIVILEGES/);
   assert.match(verifyScript, /AUTOMATION_SINGLE_MASTER_SCHEMA/);
   assert.match(verifyScript, /AUTOMATION_RECOVERY_SCHEDULE/);
+  assert.match(verifyScript, /TRASHED_ARTICLE_AUTOMATION_GUARD/);
   assert.match(verifyScript, /UNIFIED_CLEANUP_FUNCTIONS/);
   assert.match(verifyScript, /UNIFIED_CLEANUP_CLIENT_PRIVILEGES/);
   assert.match(guide, /20260929000000_unified_duplicate_cleanup\.sql/);

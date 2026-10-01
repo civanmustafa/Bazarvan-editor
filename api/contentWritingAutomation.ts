@@ -37,6 +37,13 @@ class ContentWritingAutomationApiError extends Error {
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
+const isArticleGloballyTrashed = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  const metadata = isRecord(value.metadata) ? value.metadata : {};
+  const trash = isRecord(metadata.trash) ? metadata.trash : {};
+  return Boolean(text(trash.deletedAt));
+};
+
 const requireUuid = (value: unknown, field: string): string => {
   const normalized = text(value);
   if (!UUID_PATTERN.test(normalized)) {
@@ -65,6 +72,7 @@ const firstRow = <T>(value: unknown): T | null => {
 const publicItem = (value: unknown): Record<string, unknown> | null => {
   if (!isRecord(value) || !text(value.id) || !text(value.article_id)) return null;
   const article = firstRow<Record<string, any>>(value.articles) || {};
+  if (isArticleGloballyTrashed(article)) return null;
   const session = firstRow<Record<string, any>>(value.content_writing_sessions) || {};
   return {
     id: text(value.id),
@@ -102,7 +110,7 @@ const publicItem = (value: unknown): Record<string, unknown> | null => {
 const readItem = async (articleId: string): Promise<Record<string, unknown> | null> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('content_writing_automation_items')
-    .select('*,articles(title,status),content_writing_sessions(status,quality_score,quality_report)')
+    .select('*,articles(title,status,metadata),content_writing_sessions(status,quality_score,quality_report)')
     .eq('article_id', articleId)
     .maybeSingle();
   if (error) {
@@ -119,7 +127,7 @@ const readItemById = async (
   if (!UUID_PATTERN.test(itemId)) return null;
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('content_writing_automation_items')
-    .select('*,articles(title,status),content_writing_sessions(status,quality_score,quality_report)')
+    .select('*,articles(title,status,metadata),content_writing_sessions(status,quality_score,quality_report)')
     .eq('id', itemId)
     .maybeSingle();
   if (error) {
@@ -156,7 +164,7 @@ const readItemById = async (
 const readActiveItem = async (userId: string): Promise<Record<string, unknown> | null> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
     .from('content_writing_automation_items')
-    .select('*,articles(title,status),content_writing_sessions(status,quality_score,quality_report)')
+    .select('*,articles(title,status,metadata),content_writing_sessions(status,quality_score,quality_report)')
     .in('status', ['claiming', 'writing'])
     .order('started_at', { ascending: true })
     .limit(1)
@@ -183,6 +191,46 @@ const publicAutomaticArticleFocus = async (
   const articleId = text(value.articleId);
   const lastArticleId = text(value.lastArticleId);
   const visibleTargetId = articleId || lastArticleId;
+  let targetArticle: Record<string, any> | null = null;
+  if (visibleTargetId) {
+    const { data, error } = await getExternalAnalysisSupabaseAdmin()
+      .from('articles')
+      .select('id,status,metadata')
+      .eq('id', visibleTargetId)
+      .maybeSingle();
+    if (error) throw error;
+    targetArticle = isRecord(data) ? data : null;
+  }
+
+  // A deleted row can briefly survive in a cached focus response while the
+  // database trigger releases the lane. Never render it as an inaccessible
+  // "(untitled)" article or expose a resume action during that interval.
+  if (visibleTargetId && (!targetArticle || isArticleGloballyTrashed(targetArticle))) {
+    return {
+      articleId: null,
+      articleTitle: '',
+      articleVisible: true,
+      state: 'idle',
+      currentStage: null,
+      acquiredAt: null,
+      lastProgressAt: text(value.lastProgressAt) || null,
+      nextRetryAt: null,
+      attemptCount: 0,
+      maxAttempts: 0,
+      attemptMetric: 'worker_execution',
+      recoveryCount: 0,
+      maxRecoveries: Math.max(0, Number(value.maxRecoveries) || 3),
+      lastErrorCode: null,
+      lastError: null,
+      generation: Math.max(0, Number(value.generation) || 0),
+      lastArticleId: null,
+      lastArticleTitle: '',
+      lastReleaseReason: 'article_trashed',
+      releasedAt: text(value.releasedAt) || null,
+      canResume: false,
+    };
+  }
+
   const access = visibleTargetId
     ? await getArticleAccessLevelForUser(
       getExternalAnalysisSupabaseAdmin(),
@@ -192,13 +240,7 @@ const publicAutomaticArticleFocus = async (
     : 'none';
   let articleVisible = !visibleTargetId || access !== 'none';
   if (articleVisible && draftOnly && visibleTargetId) {
-    const { data: article, error } = await getExternalAnalysisSupabaseAdmin()
-      .from('articles')
-      .select('status')
-      .eq('id', visibleTargetId)
-      .maybeSingle();
-    if (error) throw error;
-    articleVisible = text(article?.status) === 'draft';
+    articleVisible = text(targetArticle?.status) === 'draft';
   }
   return {
     articleId: articleVisible ? articleId || null : null,
