@@ -8,11 +8,11 @@ const readWorkspaceFile = (relativePath: string): Promise<string> => (
 );
 
 test('post-writing orchestration preserves the required dependency graph', async () => {
-  const [migration, api, client, dashboard] = await Promise.all([
+  const [migration, api, client, automationStages] = await Promise.all([
     readWorkspaceFile('supabase/migrations/20261006000000_article_work_readiness_orchestration.sql'),
     readWorkspaceFile('api/contentWritingAutomation.ts'),
     readWorkspaceFile('utils/contentWritingAutomation.ts'),
-    readWorkspaceFile('components/Dashboard.tsx'),
+    readWorkspaceFile('utils/articleAutomationStages.ts'),
   ]);
 
   assert.match(migration, /'google_metadata'/);
@@ -26,9 +26,9 @@ test('post-writing orchestration preserves the required dependency graph', async
   assert.match(migration, /enqueue_cleanup_after_automatic_writing_apply/);
   assert.match(api, /get_articles_automation_work_readiness/);
   assert.match(client, /ContentWritingWorkReadinessState/);
-  assert.match(dashboard, /أدرج المحتوى تلقائيا · جاهزة للعمل/);
-  assert.match(dashboard, /أدرج المحتوى تلقائيا · تنقية المحتوى/);
-  assert.match(dashboard, /أدرج المحتوى تلقائيا · تنفيذ التدقيقات الخارجية/);
+  assert.match(automationStages, /أدرج المحتوى تلقائيا · جاهزة للعمل/);
+  assert.match(automationStages, /أدرج المحتوى تلقائيا · تنقية المحتوى/);
+  assert.match(automationStages, /أدرج المحتوى تلقائيا · تنفيذ التدقيقات الخارجية/);
 });
 
 test('orchestration migration executes and gates writing, cleanup, and independent audits', async () => {

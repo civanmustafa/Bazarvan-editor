@@ -1,15 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
-  ChevronDown,
-  CircleHelp,
+  Circle,
   Clock3,
   AlertTriangle,
+  Bot,
+  Download,
+  FileSearch,
+  Link2,
   ListChecks,
   LoaderCircle,
   Play,
+  Repeat,
   RotateCcw,
   Search,
+  Sparkles,
   Square,
   Tags,
   XCircle,
@@ -39,6 +44,13 @@ import {
   getAiExecutionActivities,
   updateAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
+import type { ContentWritingArticleSummary } from '../utils/contentWritingAutomation';
+import {
+  buildArticleAutomationStages,
+  type ArticleAutomationStage,
+  type ArticleAutomationStageKey,
+  type ArticleAutomationStageStatus,
+} from '../utils/articleAutomationStages';
 
 const CompetitorDiscoveryModal = React.lazy(() => import('./CompetitorDiscoveryModal'));
 
@@ -82,8 +94,60 @@ const COMPETITOR_REQUIREMENT_FIELDS = [
 
 const AUTO_GENERATED_ENGINEERING_FIELDS = new Set(['alternative_keywords', 'lsi_keywords']);
 
-const ANALYSIS_CONTROL_GROUP_CLASS = 'inline-flex items-center gap-1 rounded-lg border border-[#d4af37]/45 bg-[#d4af37]/5 p-0.5 shadow-sm dark:border-[#d4af37]/40 dark:bg-[#d4af37]/10';
-const ANALYSIS_ACTION_BUTTON_CLASS = 'inline-flex min-h-7 items-center gap-1 rounded-md border border-[#d4af37]/30 bg-[#d4af37]/10 px-2 py-1 text-[10px] font-black text-[#8a6f1d] hover:bg-[#d4af37]/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#f2d675]';
+const AUTOMATION_STAGE_TONE: Record<ArticleAutomationStageStatus, string> = {
+  completed: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200',
+  running: 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200',
+  waiting: 'border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200',
+  partial: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200',
+  attention: 'border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200',
+  not_started: 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-600 dark:bg-gray-700/30 dark:text-gray-300',
+};
+
+const AutomationStageStateIcon: React.FC<{ status: ArticleAutomationStageStatus }> = ({ status }) => {
+  if (status === 'completed') return <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-300" />;
+  if (status === 'running') return <LoaderCircle size={12} className="animate-spin text-sky-600 dark:text-sky-300" />;
+  if (status === 'waiting') return <Clock3 size={12} className="text-violet-600 dark:text-violet-300" />;
+  if (status === 'partial') return <AlertTriangle size={12} className="text-amber-600 dark:text-amber-300" />;
+  if (status === 'attention') return <XCircle size={12} className="text-red-600 dark:text-red-300" />;
+  return <Circle size={11} className="text-gray-400 dark:text-gray-500" />;
+};
+
+const AutomationStageChip: React.FC<{
+  stage: ArticleAutomationStage;
+  icon: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+}> = ({ stage, icon, onClick, disabled = false }) => {
+  const content = (
+    <>
+      <span className="shrink-0" aria-hidden="true">{icon}</span>
+      <span className="whitespace-nowrap">{stage.label}</span>
+      <AutomationStageStateIcon status={stage.status} />
+    </>
+  );
+  const className = `inline-flex min-h-7 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-black transition-colors ${AUTOMATION_STAGE_TONE[stage.status]} ${onClick ? 'hover:brightness-95' : ''} disabled:cursor-wait disabled:opacity-60`;
+  const ariaLabel = `${stage.label}: ${stage.statusLabel}. ${stage.details}`;
+  return (
+    <span className="group/automation-stage relative inline-flex shrink-0">
+      {onClick ? (
+        <button type="button" onClick={onClick} disabled={disabled} className={className} aria-label={ariaLabel}>
+          {content}
+        </button>
+      ) : (
+        <span className={className} tabIndex={0} aria-label={ariaLabel}>
+          {content}
+        </span>
+      )}
+      <span
+        role="tooltip"
+        className="pointer-events-none invisible absolute bottom-full end-0 z-50 mb-2 w-64 translate-y-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-start text-[10px] font-semibold leading-5 text-gray-700 opacity-0 shadow-xl transition-all group-hover/automation-stage:visible group-hover/automation-stage:translate-y-0 group-hover/automation-stage:opacity-100 group-focus-within/automation-stage:visible group-focus-within/automation-stage:translate-y-0 group-focus-within/automation-stage:opacity-100 dark:border-[#454545] dark:bg-[#252525] dark:text-gray-200"
+      >
+        <strong className="block text-[11px]">{stage.label} — {stage.statusLabel}</strong>
+        <span className="block font-medium text-gray-500 dark:text-gray-400">{stage.details}</span>
+      </span>
+    </span>
+  );
+};
 
 interface ExternalAnalysisCardControlsProps {
   articleId: string;
@@ -96,6 +160,8 @@ interface ExternalAnalysisCardControlsProps {
   goalContext?: GoalContext;
   hasAlternativeKeywords: boolean;
   hasLsiKeywords: boolean;
+  googleMetadataReady: boolean;
+  contentWritingSummary?: ContentWritingArticleSummary;
   summary?: ExternalAnalysisDashboardSummary;
   onRefresh: () => Promise<void> | void;
 }
@@ -111,6 +177,8 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   goalContext,
   hasAlternativeKeywords,
   hasLsiKeywords,
+  googleMetadataReady,
+  contentWritingSummary,
   summary,
   onRefresh,
 }) => {
@@ -139,7 +207,6 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const competitorExtractionActive = externalJobHasActiveStatus(summary?.latestCompetitorExtractionJob);
   const competitorJobActive = competitorDiscoveryActive || competitorExtractionActive;
   const customCommandMode = summary?.state?.engineering_command_mode === 'custom';
-  const semanticTermsReady = hasAlternativeKeywords && hasLsiKeywords;
   // Dashboard requirement checks are intentionally a draft-only editing aid.
   // Active jobs remain synchronized below even if the article status changes.
   const requirementsEnabled = articleStatus === 'draft';
@@ -347,32 +414,6 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
     && competitorRequirements.every(requirement => requirement.status === 'met'),
   );
   const engineeringArticleTextMissing = engineeringMissingFields.has('editor_text');
-  const competitorDiscoveryResult = summary?.latestCompetitorDiscoveryJob?.result || {};
-  const competitorCandidateCount = Array.isArray(competitorDiscoveryResult.results)
-    ? competitorDiscoveryResult.results.length
-    : 0;
-  const competitorReviewStatus = typeof competitorDiscoveryResult.reviewStatus === 'string'
-    ? competitorDiscoveryResult.reviewStatus
-    : '';
-  const competitorSelection = competitorDiscoveryResult.selection
-    && typeof competitorDiscoveryResult.selection === 'object'
-    ? competitorDiscoveryResult.selection as Record<string, unknown>
-    : {};
-  const competitorAutoSelectedCount = Math.max(0, Number(competitorSelection.autoSelectedCount) || 0);
-  const competitorNeedsReview = summary?.latestCompetitorDiscoveryJob?.status === 'completed'
-    && competitorCandidateCount > 0
-    && competitorReviewStatus !== 'accepted';
-  const competitorHasNoAutomaticSelection = competitorNeedsReview
-    && competitorAutoSelectedCount === 0;
-  const competitorReadyCount = summary?.competitorReadyCount || 0;
-  const competitorTotalCount = summary?.competitorTotalCount || 0;
-
-  const requirementCounter = (requirements: RequirementItem[]): string => (
-    requirements.some(requirement => requirement.status === 'checking')
-      ? `…/${requirements.length}`
-      : `${requirements.filter(requirement => requirement.status === 'met').length}/${requirements.length}`
-  );
-
   useEffect(() => {
     const closeMenu = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -597,10 +638,27 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   const toggleRequirements = (type: 'semantic' | 'engineering' | 'competitor') => {
     setRequirementsOpen(current => current === type ? null : type);
   };
-
-  if (!requirementsEnabled && !semanticJobActive && !engineeringActive && !competitorJobActive) {
-    return null;
-  }
+  const automationStages = buildArticleAutomationStages({
+    summary,
+    contentWritingSummary,
+    hasAlternativeKeywords,
+    hasLsiKeywords,
+    googleMetadataReady,
+    locale,
+  });
+  const automationStageByKey = new Map<ArticleAutomationStageKey, ArticleAutomationStage>(
+    automationStages.map(stage => [stage.key, stage]),
+  );
+  const getAutomationStage = (key: ArticleAutomationStageKey): ArticleAutomationStage => (
+    automationStageByKey.get(key)!
+  );
+  const handleSemanticStageClick = () => {
+    if (!semanticCanStart) {
+      toggleRequirements('semantic');
+      return;
+    }
+    void handleSemantic();
+  };
 
   return (
     <div
@@ -608,75 +666,74 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
       onClick={event => event.stopPropagation()}
       onKeyDown={event => event.stopPropagation()}
     >
-      <div className="flex flex-wrap items-center gap-1.5">
-        {requirementsEnabled && (
-          <div
-            data-analysis-control-group="semantic"
-            role="group"
-            aria-label={locale === 'ar' ? 'توليد الصيغ وLSI ومقترحات Google وشروطه' : 'Semantic and Google metadata generation requirements'}
-            className={ANALYSIS_CONTROL_GROUP_CLASS}
-          >
-            <button
-              type="button"
-              onClick={handleSemantic}
-              disabled={Boolean(busyAction || semanticJobActive || !semanticCanStart)}
-              className={ANALYSIS_ACTION_BUTTON_CLASS}
-              title={locale === 'ar' ? 'توليد الصيغ وLSI وعنواني Google ووصفي Google في أمر خلفي واحد' : 'Generate alternatives, LSI, and two Google titles/descriptions in one background command'}
-            >
-            {busyAction === 'semantic' || semanticJobActive
-              ? <LoaderCircle size={12} className="animate-spin" />
-              : semanticTermsReady
-                ? <CheckCircle2 size={12} />
-                : <Tags size={12} />}
-            <span>{semanticTermsReady
-              ? (locale === 'ar' ? 'إعادة توليد الكل' : 'Regenerate all')
-              : semanticJobActive
-                ? (locale === 'ar' ? 'جاري توليد الكل' : 'Generating all')
-                : (locale === 'ar' ? 'توليد الصيغ وLSI ومقترحات Google' : 'Generate terms + Google metadata')}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleRequirements('semantic')}
-              aria-expanded={requirementsOpen === 'semantic'}
-              className={`inline-flex min-h-7 items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] font-black ${semanticRequirements.some(requirement => requirement.status === 'missing') ? 'border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-500/10' : readinessState && semanticCanStart ? 'border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-500/10' : 'border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-400 dark:hover:bg-[#333]'}`}
-              title={locale === 'ar' ? 'عرض شروط توليد الصيغ المحققة والناقصة' : 'Show met and missing generation requirements'}
-            >
-              <CircleHelp size={12} />
-              <span>{requirementCounter(semanticRequirements)}</span>
-            </button>
-          </div>
-        )}
+      <div className="flex flex-wrap items-center gap-1.5" aria-label={locale === 'ar' ? 'مسار أتمتة المقالة' : 'Article automation workflow'}>
+        <div
+          data-analysis-control-group="semantic"
+          role="group"
+          aria-label={locale === 'ar' ? 'توليد الصيغ وLSI وبيانات Google' : 'Alternative forms, LSI, and Google metadata'}
+          className="contents"
+        >
+          <AutomationStageChip
+            stage={getAutomationStage('alternative_keywords')}
+            icon={<Tags size={12} />}
+            onClick={requirementsEnabled ? handleSemanticStageClick : undefined}
+            disabled={Boolean(busyAction || semanticJobActive)}
+          />
+          <AutomationStageChip
+            stage={getAutomationStage('lsi_keywords')}
+            icon={<Sparkles size={12} />}
+            onClick={requirementsEnabled ? handleSemanticStageClick : undefined}
+            disabled={Boolean(busyAction || semanticJobActive)}
+          />
+          <AutomationStageChip
+            stage={getAutomationStage('google_metadata')}
+            icon={<FileSearch size={12} />}
+            onClick={requirementsEnabled ? handleSemanticStageClick : undefined}
+            disabled={Boolean(busyAction || semanticJobActive)}
+          />
+        </div>
 
-        {requirementsEnabled && (
+        <div
+          data-analysis-control-group="competitor"
+          role="group"
+          aria-label={locale === 'ar' ? 'المنافسون واستخراج نصوصهم' : 'Competitors and content extraction'}
+          className="contents"
+        >
+          <AutomationStageChip
+            stage={getAutomationStage('competitor_discovery')}
+            icon={<Search size={12} />}
+            onClick={requirementsEnabled ? () => { void handleCompetitors(); } : undefined}
+            disabled={busyAction === 'competitor'}
+          />
+          <AutomationStageChip
+            stage={getAutomationStage('competitor_extraction')}
+            icon={<Download size={12} />}
+            onClick={requirementsEnabled ? () => { void handleCompetitors(); } : undefined}
+            disabled={busyAction === 'competitor'}
+          />
+        </div>
+
         <div
           data-analysis-control-group="engineering"
           role="group"
-          aria-label={locale === 'ar' ? 'الأوامر اليدوية الجاهزة وشروطها' : 'Ready manual commands and their requirements'}
-          className={ANALYSIS_CONTROL_GROUP_CLASS}
+          aria-label={locale === 'ar' ? 'التدقيقات الخارجية والأوامر الجاهزة' : 'External audits and ready commands'}
+          className="contents"
         >
-          <div ref={menuRef} className="relative">
-            <button
-            type="button"
-            onClick={() => setMenuOpen(open => !open)}
-            disabled={busyAction === 'engineering'}
-            className={ANALYSIS_ACTION_BUTTON_CLASS}
-            title={locale === 'ar' ? 'اختيار أوامر جاهزة لتشغيلها بالتتابع' : 'Choose ready commands to run sequentially'}
-          >
-            {busyAction === 'engineering' ? <LoaderCircle size={12} className="animate-spin" /> : <ListChecks size={12} />}
-            <span>{locale === 'ar' ? 'الأوامر اليدوية الجاهزة' : 'Ready manual commands'}</span>
-            {customCommandMode && (
-              <span className="rounded bg-[#d4af37]/15 px-1 text-[9px] text-[#8a6f1d] dark:bg-[#d4af37]/20 dark:text-[#f2d675]">
-                {locale === 'ar' ? 'اختيار خاص' : 'Custom'}
-              </span>
-            )}
-            {selectedCommandIds.length > 0 && (
-              <span className="rounded bg-[#d4af37] px-1 text-[9px] text-white">{selectedCommandIds.length}</span>
-            )}
-            <ChevronDown size={11} className={menuOpen ? 'rotate-180' : ''} />
-            </button>
-
+          <div ref={menuRef} className="relative inline-flex">
+            <AutomationStageChip
+              stage={getAutomationStage('external_analysis')}
+              icon={<ListChecks size={12} />}
+              onClick={requirementsEnabled ? () => setMenuOpen(open => !open) : undefined}
+              disabled={busyAction === 'engineering'}
+            />
             {menuOpen && (
               <div className="editor-menu absolute end-0 top-full z-40 mt-1 w-[min(19rem,calc(100vw-2rem))] rounded-md border border-gray-200 bg-white p-1.5 shadow-xl dark:border-[#3C3C3C] dark:bg-[#2A2A2A]">
+                <div className="mb-1.5 flex items-center justify-between gap-2 border-b border-gray-100 px-1 pb-1.5 text-[10px] font-black text-gray-600 dark:border-[#3C3C3C] dark:text-gray-300">
+                  <span>{locale === 'ar' ? 'اختر التدقيقات المطلوب تشغيلها' : 'Choose audits to run'}</span>
+                  <button type="button" onClick={() => toggleRequirements('engineering')} className="text-[#8a6f1d] dark:text-[#f2d675]">
+                    {locale === 'ar' ? 'عرض الشروط' : 'Requirements'}
+                  </button>
+                </div>
                 <div className="max-h-56 overflow-y-auto custom-scrollbar">
                   {commands.map(command => {
                     const selected = selectedCommandIds.includes(command.id);
@@ -701,8 +758,8 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
                           ? 'لا يمكن تشغيل الحزمة قبل أن يحتوي نص المقالة المحفوظ على أكثر من 100 كلمة.'
                           : 'The bundle requires more than 100 saved article words before it can run.')
                       : (locale === 'ar'
-                          ? 'توجد شروط أساسية ناقصة. افتح مؤشر الشروط لمعرفة التفاصيل.'
-                          : 'Core requirements are missing. Open the requirements indicator for details.')}
+                          ? 'توجد شروط أساسية ناقصة. افتح الشروط لمعرفة التفاصيل.'
+                          : 'Core requirements are missing. Open requirements for details.')}
                   </div>
                 )}
                 <button
@@ -712,7 +769,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
                   className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-md bg-[#d4af37] px-2 py-1.5 text-[11px] font-black text-white hover:bg-[#b8922e] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Play size={12} />
-                  {locale === 'ar' ? `تشغيل المحدد (${selectedCommandIds.length})` : `Run selected (${selectedCommandIds.length})`}
+                  {locale === 'ar' ? 'تشغيل المحدد' : 'Run selected'}
                 </button>
                 {customCommandMode && (
                   <button
@@ -730,74 +787,11 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
               </div>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => toggleRequirements('engineering')}
-            aria-expanded={requirementsOpen === 'engineering'}
-            className={`inline-flex min-h-7 items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] font-black ${engineeringRequirements.some(requirement => requirement.status === 'missing') ? 'border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-500/10' : readinessState && engineeringCanQueue ? 'border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-500/10' : 'border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-400 dark:hover:bg-[#333]'}`}
-            title={locale === 'ar' ? 'عرض شروط الأوامر اليدوية المحققة والناقصة' : 'Show met and missing command requirements'}
-          >
-            <CircleHelp size={12} />
-            <span>{requirementCounter(engineeringRequirements)}</span>
-          </button>
         </div>
-        )}
 
-        {requirementsEnabled && (
-        <div
-          data-analysis-control-group="competitor"
-          role="group"
-          aria-label={locale === 'ar' ? 'المنافسون وشروطهم' : 'Competitors and their requirements'}
-          className={ANALYSIS_CONTROL_GROUP_CLASS}
-        >
-          <button
-            type="button"
-            onClick={() => void handleCompetitors()}
-            disabled={busyAction === 'competitor'}
-            className={ANALYSIS_ACTION_BUTTON_CLASS}
-            title={locale === 'ar' ? 'اكتشاف أفضل المنافسين ومراجعتهم قبل سحب المحتوى' : 'Discover the strongest competitors and review them before importing content'}
-          >
-            {busyAction === 'competitor' || competitorJobActive
-              ? <LoaderCircle size={12} className="animate-spin" />
-              : competitorReadyCount > 0
-                ? <CheckCircle2 size={12} />
-                : competitorHasNoAutomaticSelection
-                  ? <AlertTriangle size={12} />
-                  : <Search size={12} />}
-            <span>
-              {competitorExtractionActive
-                ? (locale === 'ar'
-                    ? `جاري سحب المنافسين ${competitorReadyCount}/${competitorTotalCount || '…'}`
-                    : `Importing competitors ${competitorReadyCount}/${competitorTotalCount || '…'}`)
-                : competitorDiscoveryActive
-                  ? (locale === 'ar' ? 'جاري بحث المنافسين' : 'Finding competitors')
-                  : competitorHasNoAutomaticSelection
-                    ? (locale === 'ar'
-                        ? 'اكتمل البحث بلا اختيار تلقائي'
-                        : 'Search finished without an automatic selection')
-                  : competitorNeedsReview
-                    ? (locale === 'ar'
-                        ? `مراجعة ${competitorCandidateCount} منافسين`
-                        : `Review ${competitorCandidateCount} competitors`)
-                    : competitorReadyCount > 0
-                      ? (locale === 'ar'
-                          ? `المنافسون جاهزون ${competitorReadyCount}/${competitorTotalCount}`
-                          : `Competitors ready ${competitorReadyCount}/${competitorTotalCount}`)
-                      : (locale === 'ar' ? 'بحث المنافسين' : 'Find competitors')}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => toggleRequirements('competitor')}
-            aria-expanded={requirementsOpen === 'competitor'}
-            className={`inline-flex min-h-7 items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] font-black ${competitorRequirements.some(requirement => requirement.status === 'missing') ? 'border-red-200 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-500/10' : readinessState && competitorCanStart ? 'border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-900/50 dark:text-emerald-300 dark:hover:bg-emerald-500/10' : 'border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-[#3C3C3C] dark:text-gray-400 dark:hover:bg-[#333]'}`}
-            title={locale === 'ar' ? 'عرض شروط اكتشاف المنافسين المحققة والناقصة' : 'Show met and missing competitor discovery requirements'}
-          >
-            <CircleHelp size={12} />
-            <span>{requirementCounter(competitorRequirements)}</span>
-          </button>
-        </div>
-        )}
+        <AutomationStageChip stage={getAutomationStage('content_writing')} icon={<Bot size={12} />} />
+        <AutomationStageChip stage={getAutomationStage('duplicate_suggestions')} icon={<Repeat size={12} />} />
+        <AutomationStageChip stage={getAutomationStage('internal_linking')} icon={<Link2 size={12} />} />
 
         {(semanticJobActive || engineeringActive || competitorJobActive) && (
           <button
@@ -810,25 +804,6 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             {busyAction === 'cancel' ? <LoaderCircle size={12} className="animate-spin" /> : <Square size={10} fill="currentColor" />}
             <span>{locale === 'ar' ? 'إيقاف الكل' : 'Stop all'}</span>
           </button>
-        )}
-
-        {engineeringActive && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-300">
-            <LoaderCircle size={11} className="animate-spin" />
-            {summary?.activeEngineeringCount} {locale === 'ar' ? 'قيد التنفيذ' : 'active'}
-          </span>
-        )}
-        {!semanticJobActive && !engineeringActive && (summary?.completedTaskCount || 0) > 0 && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-300">
-            <CheckCircle2 size={11} />
-            {summary?.completedTaskCount} {locale === 'ar' ? 'مهمة مكتملة' : 'completed task(s)'}
-          </span>
-        )}
-        {(summary?.retryingEngineeringCount || 0) > 0 && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-300">
-            <Clock3 size={11} />
-            {locale === 'ar' ? 'إعادة لاحقًا' : 'Retry scheduled'}
-          </span>
         )}
       </div>
 

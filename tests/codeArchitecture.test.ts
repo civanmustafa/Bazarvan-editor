@@ -294,14 +294,9 @@ test('dashboard article headers distinguish statuses and share one external-anal
   assert.match(dashboard, /<ArticleStatusControl[\s\S]*?value=\{articleStatus\}/);
   assert.match(dashboard, /articleStatus=\{articleStatus\}/);
 
-  assert.equal(
-    (externalControls.match(/className=\{ANALYSIS_CONTROL_GROUP_CLASS\}/g) || []).length,
-    3,
-  );
-  assert.equal(
-    (externalControls.match(/className=\{ANALYSIS_ACTION_BUTTON_CLASS\}/g) || []).length,
-    3,
-  );
+  assert.equal((externalControls.match(/data-analysis-control-group=/g) || []).length, 3);
+  assert.match(externalControls, /const AutomationStageChip/);
+  assert.match(externalControls, /aria-label=\{locale === 'ar' \? 'مسار أتمتة المقالة'/);
   assert.match(
     externalControls,
     /const requirementsEnabled = articleStatus === 'draft'/,
