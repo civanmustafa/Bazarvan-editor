@@ -64,6 +64,7 @@ import {
 } from '../utils/aiExecutionActivity';
 import {
   getArticleAccessBadges,
+  getArticleAccessDisplayName,
   isImplicitArticleAdministrator,
   type ArticleAccessBadge,
 } from '../utils/articleAccessBadges';
@@ -158,6 +159,10 @@ const ArticlePaginationControls: React.FC<{
 
 const getProfileLabel = (profile?: RemoteProfile): string => (
   profile?.fullName?.trim() || profile?.email?.trim() || 'مستخدم غير معروف'
+);
+
+const getProfileUsernameLabel = (profile?: RemoteProfile): string => (
+  getArticleAccessDisplayName(profile?.email, profile?.fullName) || getProfileLabel(profile)
 );
 
 const getLatestSavedAt = (articles: RemoteArticleActivity[]): string => (
@@ -672,7 +677,7 @@ const ArticleDetailsModal: React.FC<{
           )}
 
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <DetailRow label="المالك" value={ownerLabel} />
+            <DetailRow label="منشئ المقالة" value={ownerLabel} />
             <DetailRow label="الحالة" value={getN8nOptionLabel('status', article.status)} />
             <DetailRow label="المصدر" value={article.source} />
             <DetailRow label="الظهور" value={article.visibility} />
@@ -1594,21 +1599,10 @@ const Dashboard: React.FC = () => {
   }, [refreshActivitySummary]);
 
   const getOwnerLabel = (article: RemoteArticleActivity): string => {
-    const candidateIds = Array.from(new Set([
-      article.assignedTo,
-      article.ownerId,
-      article.createdBy,
-    ].filter((value): value is string => typeof value === 'string' && Boolean(value))));
-    if (candidateIds.length === 0) return '--------';
-    const profile = candidateIds
-      .map(profileId => profiles.find(item => item.id === profileId))
-      .find(candidate => candidate && !isImplicitArticleAdministrator(candidate));
-    if (profile) return getProfileLabel(profile);
-    const candidatesAreKnownAdmins = candidateIds.every(profileId => {
-      const candidate = profiles.find(item => item.id === profileId);
-      return candidate ? isImplicitArticleAdministrator(candidate) : false;
-    });
-    return candidatesAreKnownAdmins ? '--------' : 'مستخدم غير معروف';
+    const creatorId = typeof article.createdBy === 'string' ? article.createdBy.trim() : '';
+    if (!creatorId) return '--------';
+    const profile = profiles.find(item => item.id === creatorId);
+    return profile ? getProfileUsernameLabel(profile) : 'مستخدم غير معروف';
   };
 
   const handleShowArticleDetails = async (article: RemoteArticleActivity) => {
