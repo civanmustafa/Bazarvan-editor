@@ -237,6 +237,9 @@ test('URL article import integration exposes the route, inline 75/25 control, mo
   assert.match(toolbar, /initialUrl=\{articleImportUrl\}/);
   assert.match(tips, /handleLanguageChange/);
   assert.match(tips, /isIdle \? t\.idle : t\.active/);
+  assert.match(tips, /getRemoteArticleEditorSettings/);
+  assert.match(tips, /data-article-status-control/);
+  assert.match(tips, /جارٍ التحميل/);
   assert.doesNotMatch(documentActions, /onImportArticle|FileInput/);
   assert.match(editorContext, /applyImportedArticleContent/);
   assert.match(editorContext, /insertContent\(preview\.contentHtml\)/);

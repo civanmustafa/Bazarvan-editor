@@ -235,6 +235,7 @@ const getRemoteArticleId = (article?: ArticleActivity | RemoteArticleActivity | 
 };
 
 export type ActiveArticleSettings = {
+    articleId: string;
     status: string;
     accessRole: string;
     claimedAt: string;
@@ -242,6 +243,7 @@ export type ActiveArticleSettings = {
 };
 
 const EMPTY_ACTIVE_ARTICLE_SETTINGS: ActiveArticleSettings = {
+    articleId: '',
     status: '',
     accessRole: '',
     claimedAt: '',
@@ -255,6 +257,7 @@ const getActiveArticleSettings = (article?: ArticleActivity | RemoteArticleActiv
     const claim = isRecord(metadata.claim) ? metadata.claim : {};
 
     return {
+        articleId: getRemoteArticleId(article) || '',
         status: typeof settings.status === 'string' ? settings.status : remoteArticle?.status || '',
         accessRole: typeof settings.accessRole === 'string' ? settings.accessRole : '',
         claimedAt: typeof claim.claimedAt === 'string' ? claim.claimedAt : '',

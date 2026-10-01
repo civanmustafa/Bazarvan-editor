@@ -180,6 +180,12 @@ export type RemoteArticleSettingsPatch = Partial<{
   visibleToEmailsCsv: string;
 }>;
 
+export type RemoteArticleEditorSettings = {
+  articleId: string;
+  status: RemoteArticleStatus;
+  accessRole: string;
+};
+
 export type RemoteArticleTrashInfo = {
   deletedAt: string;
   deletedBy?: string;
@@ -1044,6 +1050,26 @@ export const getRemoteArticleById = async (articleId: string): Promise<RemoteArt
   const row = data as ArticleRow;
   cacheRemoteArticleSnapshot(articleId, toArticleStorageSnapshot(row, ''));
   return toRemoteArticleActivity(row);
+};
+
+export const getRemoteArticleEditorSettings = async (
+  articleId: string,
+): Promise<RemoteArticleEditorSettings> => {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('articles')
+    .select('id,status,metadata')
+    .eq('id', articleId)
+    .single();
+
+  if (error) throw error;
+  const metadata = isRecord((data as any)?.metadata) ? (data as any).metadata : {};
+  const settings = isRecord(metadata.n8nSettings) ? metadata.n8nSettings : {};
+  return {
+    articleId: String((data as any)?.id || articleId),
+    status: (data as any)?.status as RemoteArticleStatus,
+    accessRole: typeof settings.accessRole === 'string' ? settings.accessRole : '',
+  };
 };
 
 export const getCachedRemoteArticleById = async (articleId: string): Promise<RemoteArticleActivity | null> => {

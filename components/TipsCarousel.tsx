@@ -4,6 +4,11 @@ import { Languages, Lightbulb } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { ARTICLE_STATUS_DEFINITIONS } from '../constants/articleStatuses';
+import { parseAppRoute } from '../utils/appRoutes';
+import {
+  getRemoteArticleEditorSettings,
+  type RemoteArticleEditorSettings,
+} from '../utils/supabaseArticles';
 
 const ARTICLE_ACCESS_ROLE_LABELS: Record<string, { ar: string; en: string }> = {
   viewer: { ar: 'عرض', en: 'View' },
@@ -17,6 +22,7 @@ interface TipsCarouselProps {
 const TipsCarousel: React.FC<TipsCarouselProps> = ({ interval = 20000 }) => {
   const { t, isIdle, uiLanguage } = useUser();
   const articleLanguage = useEditorSelector(context => context.articleLanguage);
+  const activeArticleId = useEditorSelector(context => context.activeArticleId);
   const handleLanguageChange = useEditorSelector(context => context.handleLanguageChange);
   const activeArticleSettings = useEditorSelector(context => context.activeArticleSettings);
   const handleActiveArticleStatusChange = useEditorSelector(context => context.handleActiveArticleStatusChange);
@@ -24,6 +30,22 @@ const TipsCarousel: React.FC<TipsCarouselProps> = ({ interval = 20000 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isVisible, setIsVisible] = useState(true);
   const [isStatusSaving, setIsStatusSaving] = useState(false);
+  const [quickSettings, setQuickSettings] = useState<RemoteArticleEditorSettings | null>(null);
+  const route = parseAppRoute();
+  const routedArticleId = route.name === 'editor' ? route.articleId : null;
+  const settingsArticleId = routedArticleId || activeArticleId;
+  const contextSettingsMatch = Boolean(
+    settingsArticleId && activeArticleSettings.articleId === settingsArticleId,
+  );
+  const displayedStatus = contextSettingsMatch
+    ? activeArticleSettings.status
+    : quickSettings?.articleId === settingsArticleId ? quickSettings.status : '';
+  const displayedAccessRole = contextSettingsMatch
+    ? activeArticleSettings.accessRole
+    : quickSettings?.articleId === settingsArticleId ? quickSettings.accessRole : '';
+  const statusIsEditable = Boolean(
+    displayedStatus && settingsArticleId && activeArticleId === settingsArticleId,
+  );
 
   const handleStatusChange = useCallback(async (status: string) => {
     setIsStatusSaving(true);
@@ -35,6 +57,24 @@ const TipsCarousel: React.FC<TipsCarouselProps> = ({ interval = 20000 }) => {
         : 'Could not change the article status. Please try again.');
     }
   }, [handleActiveArticleStatusChange, uiLanguage]);
+
+  useEffect(() => {
+    if (!settingsArticleId || contextSettingsMatch) {
+      setQuickSettings(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setQuickSettings(current => current?.articleId === settingsArticleId ? current : null);
+    void getRemoteArticleEditorSettings(settingsArticleId)
+      .then(settings => {
+        if (!cancelled) setQuickSettings(settings);
+      })
+      .catch(error => {
+        console.warn(`Could not preload editor settings for article "${settingsArticleId}":`, error);
+      });
+    return () => { cancelled = true; };
+  }, [contextSettingsMatch, settingsArticleId]);
 
   useEffect(() => {
     if (tips.length === 0) return;
@@ -65,27 +105,37 @@ const TipsCarousel: React.FC<TipsCarouselProps> = ({ interval = 20000 }) => {
       </div>
 
       <div className="ms-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
-        {activeArticleSettings.status && (
-          <label className="inline-flex h-7 items-center gap-1 rounded-md bg-white/55 px-2 text-[11px] font-black text-[#806718] dark:bg-black/15 dark:text-[#f2d675]">
-            <span>{uiLanguage === 'ar' ? 'الحالة:' : 'Status:'}</span>
-            <AppSelect
-              size="compact"
-              value={activeArticleSettings.status}
-              disabled={isStatusSaving}
-              onChange={(event) => { void handleStatusChange(event.target.value); }}
-              className="max-w-[132px] bg-transparent text-[11px] font-black outline-none disabled:opacity-60"
-            >
-              {ARTICLE_STATUS_DEFINITIONS.map(({ value, labelAr, labelEn }) => (
-                <option key={value} value={value}>{uiLanguage === 'ar' ? labelAr : labelEn}</option>
-              ))}
-            </AppSelect>
-          </label>
-        )}
+        <label
+          data-article-status-control="true"
+          data-status-loading={displayedStatus ? undefined : 'true'}
+          className="inline-flex h-7 min-w-[150px] items-center gap-1 rounded-md bg-white/55 px-2 text-[11px] font-black text-[#806718] dark:bg-black/15 dark:text-[#f2d675]"
+        >
+          <span>{uiLanguage === 'ar' ? 'الحالة:' : 'Status:'}</span>
+          <AppSelect
+            size="compact"
+            value={displayedStatus}
+            disabled={isStatusSaving || !statusIsEditable}
+            aria-label={uiLanguage === 'ar' ? 'حالة المقالة' : 'Article status'}
+            onChange={(event) => { void handleStatusChange(event.target.value); }}
+            className="max-w-[132px] bg-transparent text-[11px] font-black outline-none disabled:opacity-60"
+          >
+            {!displayedStatus && (
+              <option value="">
+                {settingsArticleId
+                  ? (uiLanguage === 'ar' ? 'جارٍ التحميل...' : 'Loading...')
+                  : (uiLanguage === 'ar' ? 'بعد الحفظ' : 'After saving')}
+              </option>
+            )}
+            {ARTICLE_STATUS_DEFINITIONS.map(({ value, labelAr, labelEn }) => (
+              <option key={value} value={value}>{uiLanguage === 'ar' ? labelAr : labelEn}</option>
+            ))}
+          </AppSelect>
+        </label>
 
-        {activeArticleSettings.accessRole && (
+        {displayedAccessRole && (
           <span className="inline-flex h-7 items-center rounded-md bg-white/55 px-2 text-[11px] font-black text-gray-600 dark:bg-black/15 dark:text-gray-300">
             {uiLanguage === 'ar' ? 'الصلاحية:' : 'Access:'}{' '}
-            {ARTICLE_ACCESS_ROLE_LABELS[activeArticleSettings.accessRole]?.[uiLanguage] || activeArticleSettings.accessRole}
+            {ARTICLE_ACCESS_ROLE_LABELS[displayedAccessRole]?.[uiLanguage] || displayedAccessRole}
           </span>
         )}
 
