@@ -85,7 +85,9 @@ test('dashboard cards merge access badges into the existing users field without 
   assert.match(dashboard, /المستخدمون القادرون على الوصول إلى المقالة/);
   assert.match(dashboard, /profile\.email && !isImplicitArticleAdministrator\(profile\)/);
   assert.match(dashboard, /tracking-wider text-gray-400[^>]*>--------<\/span>/);
-  assert.match(dashboard, /candidatesAreKnownAdmins \? '--------' : 'مستخدم غير معروف'/);
+  assert.match(dashboard, /const getOwnerLabel = \(article: RemoteArticleActivity\)/);
+  assert.match(dashboard, /profile \? getProfileUsernameLabel\(profile\) : 'مستخدم غير معروف'/);
+  assert.doesNotMatch(dashboard, /candidatesAreKnownAdmins \? '--------'/);
   assert.match(dashboard, /isEditor \? 'محرر' : 'معاينة'/);
   assert.doesNotMatch(dashboard, /\{articleAccessBadges\.length > 0 && \(\s*<div/);
 });

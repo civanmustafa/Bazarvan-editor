@@ -143,6 +143,11 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
     || readiness?.processingComplete === true;
   const missing = new Set(readiness?.missingFields || []);
   const queueCandidate = status?.overview.candidates.find(candidate => candidate.articleId === articleId) || null;
+  const automaticWritingNotRequired = item?.status === 'cancelled' && [
+    'automatic_writing_not_required',
+    'automatic_article_editor_not_empty',
+    'article_left_automation_scope',
+  ].includes(item.lastErrorCode || '');
 
   const presentation = useMemo(() => {
     if (loading && !status) return {
@@ -226,6 +231,17 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
       label: isArabic ? 'تحتاج تدخلًا يدويًا' : 'Needs manual attention',
       detail: getContentWritingAutomationErrorMessage(item.lastError, isArabic),
     };
+    if (automaticWritingNotRequired) return {
+      tone: 'green',
+      label: isArabic ? 'لا تحتاج كتابة تلقائية' : 'Automatic writing not required',
+      detail: item?.lastErrorCode === 'article_left_automation_scope'
+        ? (isArabic
+          ? 'خرجت المقالة من مرحلة المسودة، لذلك أُغلقت مهمة الكتابة القديمة تلقائيًا.'
+          : 'The article left draft preparation, so its stale writing task was closed automatically.')
+        : (isArabic
+          ? 'المحرر يحتوي محتوى محفوظًا أو اكتملت الكتابة سابقًا، لذلك لن تدخل المقالة طابور الكتابة.'
+          : 'The editor has saved content or writing already completed, so the article will not enter the writing queue.'),
+    };
     if (item?.status === 'cancelled') return {
       tone: 'gray',
       label: isArabic ? 'أُزيلت من الطابور' : 'Removed from queue',
@@ -280,6 +296,7 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
     };
   }, [
     activeFullPipeline,
+    automaticWritingNotRequired,
     competitorMinimumMet,
     configuredMinimum,
     cooldownMs,
@@ -408,7 +425,7 @@ const ContentWritingAutomationArticleStatus: React.FC<Props> = ({
             </div>
           )}
 
-          {item && ['ready', 'blocked', 'cancelled', 'completed'].includes(item.status) && (
+          {item && !automaticWritingNotRequired && ['ready', 'blocked', 'cancelled', 'completed'].includes(item.status) && (
             <div className="mt-2 flex flex-wrap gap-2 border-t border-current/10 pt-2">
               {item.status !== 'ready' && (
                 <button

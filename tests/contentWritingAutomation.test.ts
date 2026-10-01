@@ -217,6 +217,28 @@ test('automatic writing requires an empty saved editor and cancels invalid activ
   assert.match(client, /article_editor_empty: \['المحرر خالٍ من نص سابق'/);
 });
 
+test('automatic writing closes stale queue work when content or workflow state makes writing unnecessary', async () => {
+  const [migration, scheduler, panel, release] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20261014000000_finalize_unneeded_automatic_writing.sql'),
+    readWorkspaceFile('server/contentWritingAutomation.ts'),
+    readWorkspaceFile('components/ContentWritingAutomationArticleStatus.tsx'),
+    readWorkspaceFile('constants/contentWritingRelease.ts'),
+  ]);
+
+  assert.match(migration, /automatic_content_writing_requirement/);
+  assert.match(migration, /article_body_has_content\([\s\S]*content_json[\s\S]*content_html[\s\S]*plain_text/);
+  assert.match(migration, /article_left_automation_scope/);
+  assert.match(migration, /content_writing_already_completed/);
+  assert.match(migration, /create trigger finalize_unneeded_automatic_writing/);
+  assert.match(migration, /before insert or update on public\.content_writing_automation_items/);
+  assert.match(migration, /attempt_count = 0/);
+  assert.match(migration, /select 11/);
+  assert.match(scheduler, /item\.status !== 'claiming'/);
+  assert.match(panel, /automaticWritingNotRequired/);
+  assert.match(panel, /لا تحتاج كتابة تلقائية/);
+  assert.match(release, /20261014000000_finalize_unneeded_automatic_writing\.sql/);
+});
+
 test('automatic writing does not spend an AI attempt on missing prerequisites and requeues after preparation', async () => {
   const [scheduler, settings, dashboard, API] = await Promise.all([
     readWorkspaceFile('server/contentWritingAutomation.ts'),

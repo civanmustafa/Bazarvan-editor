@@ -272,6 +272,7 @@ const claimNextItem = async (
     || !item.article_id.trim()
     || typeof item.requested_by !== 'string'
     || !item.requested_by.trim()
+    || item.status !== 'claiming'
   ) return null;
   return item;
 };
