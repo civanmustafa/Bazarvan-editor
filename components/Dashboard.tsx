@@ -62,7 +62,11 @@ import {
     beginAiExecutionActivity,
     finishAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
-import { getArticleAccessBadges, type ArticleAccessBadge } from '../utils/articleAccessBadges';
+import {
+  getArticleAccessBadges,
+  isImplicitArticleAdministrator,
+  type ArticleAccessBadge,
+} from '../utils/articleAccessBadges';
 import type { DuplicateCleanupDashboardSummary } from '../utils/duplicateCleanupDashboard';
 import { useDashboardArticleEditorPresence, type ArticlePresenceLoadStatus } from '../hooks/useArticleEditorPresence';
 import type { ArticleEditorPresence } from '../utils/articleEditorPresence';
@@ -154,10 +158,6 @@ const ArticlePaginationControls: React.FC<{
 
 const getProfileLabel = (profile?: RemoteProfile): string => (
   profile?.fullName?.trim() || profile?.email?.trim() || 'مستخدم غير معروف'
-);
-
-const getArticleOwnerId = (article: RemoteArticleActivity): string | null => (
-  article.ownerId || article.createdBy || article.assignedTo || null
 );
 
 const getLatestSavedAt = (articles: RemoteArticleActivity[]): string => (
@@ -413,7 +413,7 @@ const ArticleAccessBadgesInline: React.FC<{
         </span>
       );
     }) : (
-      <span className="font-bold text-gray-400 dark:text-gray-500">لا مستخدمين محددين</span>
+      <span className="font-bold tracking-wider text-gray-400 dark:text-gray-500">--------</span>
     )}
   </>
 );
@@ -423,7 +423,7 @@ const ArticleAccessUsersField: React.FC<{
 }> = ({ badges }) => (
   <span
     className="article-list-field inline-flex min-h-7 min-w-0 max-w-full shrink-0 flex-wrap items-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-[10px] text-gray-700 dark:text-gray-200"
-    title={badges.map(access => `${access.name} — ${access.role === 'editor' ? 'محرر' : 'معاينة'}`).join('، ') || 'لا مستخدمين محددين'
+    title={badges.map(access => `${access.name} — ${access.role === 'editor' ? 'محرر' : 'معاينة'}`).join('، ') || '--------'
     }
     aria-label="المستخدمون القادرون على الوصول إلى المقالة"
   >
@@ -531,7 +531,7 @@ const EditableN8nUsersField: React.FC<{
   const [draftEmails, setDraftEmails] = useState<string[]>(() => parseVisibleUserEmails(value));
   const availableProfiles = useMemo(() => (
     profiles
-      .filter(profile => profile.email)
+      .filter(profile => profile.email && !isImplicitArticleAdministrator(profile))
       .sort((left, right) => getProfileLabel(left).localeCompare(getProfileLabel(right)))
   ), [profiles]);
 
@@ -573,7 +573,7 @@ const EditableN8nUsersField: React.FC<{
     >
       <summary
         className={`article-list-field inline-flex min-h-7 min-w-[148px] max-w-full list-none flex-wrap items-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-[10px] font-bold text-gray-700 dark:text-gray-200 ${disabled ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}
-        title={accessBadges.map(access => `${access.name} — ${access.role === 'editor' ? 'محرر' : 'معاينة'}`).join('، ') || 'اختيار المستخدمين'}
+        title={accessBadges.map(access => `${access.name} — ${access.role === 'editor' ? 'محرر' : 'معاينة'}`).join('، ') || '--------'}
         aria-label="المستخدمون القادرون على الوصول إلى المقالة — اضغط للتعديل"
       >
         <ArticleAccessBadgesInline badges={accessBadges} />
@@ -1594,9 +1594,21 @@ const Dashboard: React.FC = () => {
   }, [refreshActivitySummary]);
 
   const getOwnerLabel = (article: RemoteArticleActivity): string => {
-    const ownerId = getArticleOwnerId(article);
-    const profile = ownerId ? profiles.find(item => item.id === ownerId) : undefined;
-    return getProfileLabel(profile);
+    const candidateIds = Array.from(new Set([
+      article.assignedTo,
+      article.ownerId,
+      article.createdBy,
+    ].filter((value): value is string => typeof value === 'string' && Boolean(value))));
+    if (candidateIds.length === 0) return '--------';
+    const profile = candidateIds
+      .map(profileId => profiles.find(item => item.id === profileId))
+      .find(candidate => candidate && !isImplicitArticleAdministrator(candidate));
+    if (profile) return getProfileLabel(profile);
+    const candidatesAreKnownAdmins = candidateIds.every(profileId => {
+      const candidate = profiles.find(item => item.id === profileId);
+      return candidate ? isImplicitArticleAdministrator(candidate) : false;
+    });
+    return candidatesAreKnownAdmins ? '--------' : 'مستخدم غير معروف';
   };
 
   const handleShowArticleDetails = async (article: RemoteArticleActivity) => {

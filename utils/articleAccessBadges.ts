@@ -10,6 +10,7 @@ type AccessProfile = {
   id?: string | null;
   email?: string | null;
   fullName?: string | null;
+  role?: 'admin' | 'user' | string | null;
 };
 
 type ArticleAccessSource = {
@@ -22,6 +23,14 @@ type ArticleAccessSource = {
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
 );
+
+const PRIMARY_ADMIN_EMAIL = 'ciwan.mu90@gmail.com';
+
+export const isImplicitArticleAdministrator = (profile?: AccessProfile | null): boolean => {
+  if (!profile) return false;
+  const email = typeof profile.email === 'string' ? profile.email.trim().toLowerCase() : '';
+  return profile.role === 'admin' || email === PRIMARY_ADMIN_EMAIL;
+};
 
 export const getArticleAccessDisplayName = (
   email?: string | null,
@@ -60,12 +69,26 @@ export const getArticleAccessBadges = (
       .filter(profile => typeof profile.id === 'string' && profile.id)
       .map(profile => [profile.id as string, profile]),
   );
+  const profilesByEmail = new Map(
+    profiles
+      .filter(profile => typeof profile.email === 'string' && profile.email.trim())
+      .map(profile => [profile.email!.trim().toLowerCase(), profile]),
+  );
 
   const addBadge = (input: AccessProfile, role: ArticleAccessBadgeRole): void => {
-    const name = getArticleAccessDisplayName(input.email, input.fullName);
-    if (!name) return;
-    const normalizedEmail = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
     const normalizedId = typeof input.id === 'string' ? input.id.trim() : '';
+    const normalizedEmail = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+    const knownProfile = (normalizedId ? profilesById.get(normalizedId) : undefined)
+      || (normalizedEmail ? profilesByEmail.get(normalizedEmail) : undefined);
+    const resolvedInput = knownProfile ? {
+      id: input.id ?? knownProfile.id,
+      email: input.email ?? knownProfile.email,
+      fullName: input.fullName ?? knownProfile.fullName,
+      role: input.role ?? knownProfile.role,
+    } : input;
+    if (isImplicitArticleAdministrator(resolvedInput)) return;
+    const name = getArticleAccessDisplayName(resolvedInput.email, resolvedInput.fullName);
+    if (!name) return;
     const aliases = [
       normalizedId ? `id:${normalizedId}` : '',
       normalizedEmail ? `email:${normalizedEmail}` : '',
@@ -104,11 +127,12 @@ export const getArticleAccessBadges = (
       id,
       email: typeof value.email === 'string' ? value.email : profile?.email,
       fullName: typeof value.fullName === 'string' ? value.fullName : profile?.fullName,
+      role: profile?.role,
     }, normalizeRole(value.role, fallbackRole));
   });
 
   splitVisibleEmails(n8nSettings.visibleToEmailsCsv).forEach(email => {
-    addBadge({ email }, fallbackRole);
+    addBadge(profilesByEmail.get(email) || { email }, fallbackRole);
   });
 
   return [...badges.values()].sort((left, right) => {
