@@ -3,10 +3,10 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 
-const migrationUrl = new URL(
+const migrationUrls = [
   '../supabase/migrations/20261014000000_finalize_unneeded_automatic_writing.sql',
-  import.meta.url,
-);
+  '../supabase/migrations/20261014010000_clear_satisfied_writing_focus_pauses.sql',
+].map(path => new URL(path, import.meta.url));
 
 test('database finalizes automatic writing when an article has content or leaves draft scope', async () => {
   const db = new PGlite();
@@ -77,13 +77,24 @@ test('database finalizes automatic writing when an article has content or leaves
       returns jsonb language sql as $$ select '{}'::jsonb $$;
     `);
 
-    await db.exec(await readFile(migrationUrl, 'utf8'));
+    for (const migrationUrl of migrationUrls) {
+      await db.exec(await readFile(migrationUrl, 'utf8'));
+    }
 
     const draftId = '00000000-0000-4000-8000-000000000101';
     await db.exec(`
       insert into public.articles(id) values ('${draftId}');
       insert into public.content_writing_automation_items(article_id, status, attempt_count)
       values ('${draftId}', 'ready', 2);
+      insert into public.automatic_article_focus_pauses(article_id, reason, error_code, error_message)
+      values (
+        '${draftId}', 'terminal_stage_failure', 'automatic_writing_not_required',
+        'The article editor already contains content; automatic writing is no longer required.'
+      );
+      update public.automatic_article_focus
+      set state = 'needs_attention', current_stage = 'duplicate_cleanup',
+          last_article_id = '${draftId}', last_error_code = 'automatic_writing_not_required',
+          last_error = 'The article editor already contains content; automatic writing is no longer required.';
       update public.articles set content_html = '<p>Saved prose</p>' where id = '${draftId}';
     `);
     const draftItem = await db.query<{ status: string; attempt_count: number; last_error_code: string }>(`
@@ -95,6 +106,15 @@ test('database finalizes automatic writing when an article has content or leaves
       attempt_count: 0,
       last_error_code: 'automatic_writing_not_required',
     });
+    const focus = await db.query<{ state: string; last_error_code: string | null }>(`
+      select state, last_error_code from public.automatic_article_focus where singleton is true
+    `);
+    assert.deepEqual(focus.rows[0], { state: 'idle', last_error_code: null });
+    const pause = await db.query<{ count: number }>(`
+      select count(*)::integer as count from public.automatic_article_focus_pauses
+      where article_id = '${draftId}'
+    `);
+    assert.equal(pause.rows[0]?.count, 0);
 
     const reviewId = '00000000-0000-4000-8000-000000000102';
     await db.exec(`

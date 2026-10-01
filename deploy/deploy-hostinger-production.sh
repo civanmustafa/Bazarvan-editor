@@ -12,7 +12,7 @@ if [[ ! "${TARGET_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 
-for command_name in git npm pm2 curl flock; do
+for command_name in git npm pm2 curl flock docker; do
   if ! command -v "${command_name}" >/dev/null 2>&1; then
     echo "Required deployment command is unavailable: ${command_name}" >&2
     exit 1
@@ -82,6 +82,9 @@ set -a
 source .env.production
 set +a
 
+BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=138 \
+  bash deploy/hostinger-supabase/apply-project-migrations.sh
+
 npm ci --include=dev
 npm run build
 
@@ -121,6 +124,9 @@ fi
 
 pm2 describe "${CONTENT_WRITING_PREPARATION_APP}" >/dev/null
 pm2 save
+
+EXPECTED_MIGRATIONS=138 \
+  bash deploy/hostinger-supabase/verify-project-schema.sh
 
 wait_for_endpoint() {
   local endpoint="$1"

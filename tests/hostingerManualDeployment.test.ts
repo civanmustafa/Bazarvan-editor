@@ -36,14 +36,17 @@ test('manual Hostinger deployment verifies the commit and restarts only approved
 });
 
 test('Hostinger schema scripts and guide track the current production migrations', async () => {
-  const [applyScript, verifyScript, guide] = await Promise.all([
+  const [applyScript, verifyScript, deployScript, guide] = await Promise.all([
     readFile(path.join(root, 'deploy', 'hostinger-supabase', 'apply-project-migrations.sh'), 'utf8'),
     readFile(path.join(root, 'deploy', 'hostinger-supabase', 'verify-project-schema.sh'), 'utf8'),
+    readFile(path.join(root, 'deploy', 'deploy-hostinger-production.sh'), 'utf8'),
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-136/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-136/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-138/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-138/);
+  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=138/);
+  assert.match(deployScript, /verify-project-schema\.sh/);
   assert.match(verifyScript, /get_visible_automation_task_inventory_v9/);
   assert.match(guide, /20261006000000_article_work_readiness_orchestration\.sql/);
   assert.match(guide, /20261007000000_finish_focused_article_first\.sql/);
@@ -53,6 +56,8 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20261012000000_truthful_gemini_attempt_budget\.sql/);
   assert.match(guide, /20261012010000_complete_dashboard_user_filter\.sql/);
   assert.match(guide, /20261013000000_optimize_automation_inventory_refresh\.sql/);
+  assert.match(guide, /20261014000000_finalize_unneeded_automatic_writing\.sql/);
+  assert.match(guide, /20261014010000_clear_satisfied_writing_focus_pauses\.sql/);
   assert.match(guide, /20261011000000_visible_automatic_recovery_schedule\.sql/);
   assert.match(guide, /20261003000000_automation_inventory_completion_and_auto_recovery\.sql/);
   assert.match(guide, /20261002000000_visible_automation_task_inventory\.sql/);
