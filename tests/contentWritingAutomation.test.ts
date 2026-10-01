@@ -245,10 +245,12 @@ test('automatic writing closes stale queue work when content or workflow state m
 });
 
 test('automatic writing does not spend an AI attempt on missing prerequisites and requeues after preparation', async () => {
-  const [scheduler, settings, dashboard, API] = await Promise.all([
+  const [scheduler, settings, dashboard, automationControls, automationStages, API] = await Promise.all([
     readWorkspaceFile('server/contentWritingAutomation.ts'),
     readWorkspaceFile('constants/settingsRegistry.ts'),
     readWorkspaceFile('components/Dashboard.tsx'),
+    readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
+    readWorkspaceFile('utils/articleAutomationStages.ts'),
     readWorkspaceFile('api/contentWritingAutomation.ts'),
   ]);
 
@@ -261,10 +263,12 @@ test('automatic writing does not spend an AI attempt on missing prerequisites an
   assert.doesNotMatch(scheduler, /enqueueNextAutomaticCompetitorPreparation/);
   assert.match(API, /typeof session\.quality_score === 'number'/);
   assert.match(API, /action === 'summaries'/);
-  assert.match(dashboard, /label: 'أدرج المحتوى تلقائيا'/);
-  assert.match(dashboard, /label: 'بانتظار دورها في طابور الكتابة'/);
-  assert.match(dashboard, /label: 'لم تتجاوز سياسة الجودة\.'/);
-  assert.match(dashboard, /محتوى جزئي محفوظ/);
+  assert.match(dashboard, /contentWritingSummary=/);
+  assert.match(automationControls, /buildArticleAutomationStages/);
+  assert.match(automationStages, /أدرج المحتوى تلقائيا/);
+  assert.match(automationStages, /بانتظار دورها في طابور الكتابة/);
+  assert.match(automationStages, /لم تتجاوز سياسة الجودة\./);
+  assert.match(automationStages, /محتوى جزئي محفوظ/);
 });
 
 test('manual writing and the full workflow explicitly arbitrate with the automatic queue', async () => {

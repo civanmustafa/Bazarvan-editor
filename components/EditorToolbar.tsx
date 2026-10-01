@@ -13,6 +13,7 @@ import DocumentActions from './toolbar/DocumentActions';
 import FindAndReplace from './toolbar/FindAndReplace';
 import NewArticleLanguageModal from './NewArticleLanguageModal';
 import ArticleImportModal from './ArticleImportModal';
+import StructuredArticleExportActions from './toolbar/StructuredArticleExportActions';
 
 /*
  * Toolbar composition:
@@ -286,6 +287,10 @@ const EditorToolbar: React.FC<EditorToolbarProps> = ({
                     onAnalyzeHeadings={onAnalyzeHeadings}
                 />
                 
+                <Separator />
+
+                <StructuredArticleExportActions locale={uiLanguage} />
+
                 <Separator />
 
                 <DocumentActions
