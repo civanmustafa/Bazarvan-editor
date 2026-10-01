@@ -2,12 +2,56 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
+import { selectExpectedNextAutomaticArticle } from '../utils/automaticArticleQueue.ts';
+import type { AutomationTaskInventoryItem } from '../utils/contentWritingAutomation.ts';
 
 const readWorkspaceFile = (relativePath: string): Promise<string> => (
   readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8')
 );
 
 const migrationPath = 'supabase/migrations/20261007000000_finish_focused_article_first.sql';
+
+const queueTask = (
+  articleId: string,
+  overrides: Partial<AutomationTaskInventoryItem> = {},
+): AutomationTaskInventoryItem => ({
+  taskId: `task-${articleId}`,
+  operationKey: 'content_writing',
+  articleId,
+  articleTitle: `Article ${articleId}`,
+  status: 'ready',
+  scheduled: false,
+  scheduleAt: null,
+  startedAt: null,
+  readyAt: '2026-10-01T10:00:00.000Z',
+  updatedAt: '2026-10-01T10:00:00.000Z',
+  sourceType: 'writing_candidate',
+  sourceId: null,
+  priorityRank: 1,
+  reasonCode: null,
+  reason: null,
+  attemptCount: 0,
+  maxAttempts: 6,
+  missingFields: [],
+  usableCompetitorCount: 3,
+  minimumCompetitorCount: 3,
+  recoveryCount: 0,
+  maxRecoveries: 3,
+  manualReview: false,
+  runnable: true,
+  ...overrides,
+});
+
+test('next automatic article excludes the focused and manually reviewed articles', () => {
+  const selected = selectExpectedNextAutomaticArticle([
+    queueTask('current', { status: 'running', startedAt: '2026-10-01T09:00:00.000Z' }),
+    queueTask('manual-review', { manualReview: true, readyAt: '2026-10-01T08:00:00.000Z' }),
+    queueTask('later', { readyAt: '2026-10-01T11:00:00.000Z' }),
+    queueTask('next', { readyAt: '2026-10-01T10:30:00.000Z' }),
+  ], 'current');
+
+  assert.equal(selected?.articleId, 'next');
+});
 
 test('finish-first migration contains one shared automatic article lane', async () => {
   const [migration, api, client, panel, writingWorker, masterWorker] = await Promise.all([
@@ -29,6 +73,9 @@ test('finish-first migration contains one shared automatic article lane', async 
   assert.match(api, /skip_automatic_article_focus/);
   assert.match(client, /AutomaticArticleFocus/);
   assert.match(panel, /أولوية إنهاء المقالة الحالية/);
+  assert.match(panel, /المقالة التالية المتوقعة/);
+  assert.match(panel, /موعد التشغيل القادم/);
+  assert.match(panel, /data-automatic-next-start/);
   assert.doesNotMatch(writingWorker, /reconcile_automatic_article_focus/);
   assert.match(masterWorker, /reconcileArticleAutomationCoordinator/);
   assert.match(masterWorker, /EXTERNAL_ANALYSIS_AUTOMATION_MASTER/);

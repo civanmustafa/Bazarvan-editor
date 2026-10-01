@@ -35,6 +35,7 @@ import {
   type AutomationTaskInventoryItem,
   type ContentWritingAutomationOverview,
 } from '../utils/contentWritingAutomation';
+import { selectExpectedNextAutomaticArticle } from '../utils/automaticArticleQueue';
 import {
   buildDashboardAutomationOperations,
   countDashboardAutomationIssues,
@@ -491,6 +492,10 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   const hasRunnableWritingTask = useMemo(() => taskInventory.some(task => (
     task.operationKey === 'content_writing' && task.runnable && task.status === 'ready'
   )), [taskInventory]);
+  const expectedNextArticle = useMemo(() => selectExpectedNextAutomaticArticle(
+    taskInventory,
+    overview?.focus?.articleId,
+  ), [overview?.focus?.articleId, taskInventory]);
   const nextAutomaticRecoveryTime = automaticRecovery?.nextRecoveryAt
     ? Date.parse(automaticRecovery.nextRecoveryAt)
     : Number.NaN;
@@ -794,11 +799,67 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                 )}
               </div>
             )}
-            {overview.focus.nextRetryAt && Date.parse(overview.focus.nextRetryAt) > now && (
-              <span className="mt-1.5 block text-[9px] font-black text-amber-700 dark:text-amber-300">
-                {isArabic ? 'إعادة المحاولة بعد ' : 'Retry in '}
-                {formatCountdown(Date.parse(overview.focus.nextRetryAt) - now, isArabic)}
-              </span>
+            {overview.focus.articleId && (
+              <div
+                data-automatic-next-article="true"
+                className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 border-t border-blue-200/70 pt-2 text-[10px] dark:border-blue-900/60"
+              >
+                <span className="font-black text-gray-600 dark:text-gray-300">
+                  {taskScope === 'system'
+                    ? (isArabic ? 'المقالة التالية المتوقعة:' : 'Expected next article:')
+                    : (isArabic ? 'التالي ضمن المقالات المتاحة لك:' : 'Next among your accessible articles:')}
+                </span>
+                {expectedNextArticle ? (
+                  <button
+                    type="button"
+                    onClick={() => navigateToAppPath(buildEditorArticlePath(expectedNextArticle.articleId))}
+                    className="flex min-w-0 max-w-full items-center gap-1 font-black text-blue-700 hover:underline dark:text-blue-300"
+                  >
+                    <ExternalLink size={10} className="shrink-0" />
+                    <span className="truncate">{expectedNextArticle.articleTitle || expectedNextArticle.articleId}</span>
+                  </button>
+                ) : (
+                  <span className="font-bold text-gray-500 dark:text-gray-400">
+                    {isArabic ? 'لا توجد مقالة أخرى مؤهلة ظاهرة الآن.' : 'No other visible eligible article right now.'}
+                  </span>
+                )}
+              </div>
+            )}
+            {overview.focus.articleId && (
+              <div
+                data-automatic-next-start="true"
+                className="mt-1.5 flex items-start gap-1.5 text-[9px] font-bold text-gray-600 dark:text-gray-300"
+              >
+                <Clock3 size={11} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-300" />
+                {overview.focus.nextRetryAt && Date.parse(overview.focus.nextRetryAt) > now ? (
+                  <span>
+                    <span className="font-black text-amber-700 dark:text-amber-300">
+                      {isArabic ? 'موعد التشغيل القادم: ' : 'Next run: '}
+                      {new Date(overview.focus.nextRetryAt).toLocaleString(isArabic ? 'ar' : 'en')}
+                    </span>
+                    <span className="block text-gray-500 dark:text-gray-400">
+                      {isArabic ? 'متبقٍ ' : 'In '}
+                      {formatCountdown(Date.parse(overview.focus.nextRetryAt) - now, isArabic)}
+                    </span>
+                  </span>
+                ) : overview.focus.state === 'needs_attention' ? (
+                  <span className="text-red-600 dark:text-red-300">
+                    {isArabic
+                      ? 'لا يوجد موعد تشغيل حتى معالجة المانع أو نقل المقالة للمراجعة.'
+                      : 'No next run is scheduled until the blocker is resolved or the article moves to review.'}
+                  </span>
+                ) : overview.focus.state === 'waiting_retry' ? (
+                  <span className="text-amber-700 dark:text-amber-300">
+                    {isArabic ? 'سيبدأ في أول دورة تشغيل متاحة.' : 'It will start on the next available worker cycle.'}
+                  </span>
+                ) : (
+                  <span>
+                    {isArabic
+                      ? 'التشغيل القادم: بعد اكتمال المرحلة الحالية وتوفر العامل؛ لا يوجد وقت ثابت بعد.'
+                      : 'Next run: after the current stage finishes and a worker is available; no fixed time yet.'}
+                  </span>
+                )}
+              </div>
             )}
             {overview.focus.lastError && overview.focus.articleVisible && (
               <span className="mt-1.5 line-clamp-2 block text-[9px] font-bold text-red-600 dark:text-red-300">
