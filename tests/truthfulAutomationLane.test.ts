@@ -76,3 +76,24 @@ test('current blockers are separated from historical errors and shown once at th
   assert.match(guard, /ExternalAnalysisPrerequisiteError/);
   assert.match(worker, /deferExternalAnalysisJobForPrerequisite/);
 });
+
+test('unfinished task cards name exact requirements and the article holding lane priority', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20261019000000_detailed_automation_prerequisites.sql',
+  );
+  const panel = await readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx');
+  const taskNormalizer = await readWorkspaceFile('utils/contentWritingAutomation.ts');
+
+  assert.match(migration, /rename to get_visible_automation_task_inventory_v15/);
+  assert.match(migration, /'code', 'google_titles'/);
+  assert.match(migration, /'code', 'google_descriptions'/);
+  assert.match(migration, /'code', 'automatic_article_focus'/);
+  assert.match(migration, /'blockedByArticleTitle'/);
+  assert.match(migration, /select 16/);
+  assert.match(panel, /المتطلبات أو النتائج الناقصة/);
+  assert.match(panel, /سبب عدم البدء الآن/);
+  assert.match(panel, /ستُعاد جدولة هذه المهمة تلقائيًا بعد تحرر المسار/);
+  assert.match(taskNormalizer, /AutomationTaskRequirement/);
+  assert.match(taskNormalizer, /blockedByArticleTitle/);
+  assert.match(taskNormalizer, /blockedByState/);
+});

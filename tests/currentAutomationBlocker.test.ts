@@ -13,7 +13,12 @@ test('current blocker migration releases stale prerequisites and reports only on
       create role anon; create role authenticated; create role service_role;
       create table public.articles (
         id uuid primary key, title text not null, status text not null,
-        keywords jsonb not null default '{}'::jsonb, created_at timestamptz default now()
+        keywords jsonb not null default '{}'::jsonb, plain_text text,
+        created_at timestamptz default now()
+      );
+      create table public.app_settings (key text primary key, value jsonb not null);
+      create table public.article_competitors (
+        article_id uuid references public.articles(id), status text, content_text text
       );
       create table public.ai_external_analysis_jobs (
         id uuid primary key default gen_random_uuid(), article_id uuid references public.articles(id),
@@ -42,6 +47,10 @@ test('current blocker migration releases stale prerequisites and reports only on
 
       create function public.article_is_globally_trashed(uuid)
       returns boolean language sql stable as $$ select false $$;
+      create function public.article_editor_has_text(text)
+      returns boolean language sql immutable as $$ select nullif(btrim($1), '') is not null $$;
+      create function public.article_access_level_for_user(uuid,uuid)
+      returns text language sql stable as $$ select 'owner'::text $$;
       create function public.article_automation_policy(uuid)
       returns jsonb language sql stable as $$ select '{
         "autoGenerateAlternativeKeywords":true,
@@ -121,6 +130,9 @@ test('current blocker migration releases stale prerequisites and reports only on
         ('${articleBlocked}','No competitors','draft','{
           "secondaries":["alternative"],"lsi":["semantic"]
         }'::jsonb);
+      insert into public.app_settings(key,value) values(
+        'ai','{"contentWritingAutomationMinimumCompetitors":2}'::jsonb
+      );
       insert into public.automatic_article_focus(singleton,last_article_id,state)
       values(true,'${articleResolved}','needs_attention');
       insert into public.automatic_article_focus_pauses(
@@ -217,6 +229,54 @@ test('current blocker migration releases stale prerequisites and reports only on
     assert.equal((await db.query<{ version: number }>(`
       select public.content_writing_automation_schema_version() version
     `)).rows[0].version, 15);
+
+    await db.exec(`
+      create or replace function public.get_visible_automation_task_inventory(p_requested_by uuid)
+      returns jsonb language sql stable as $$
+        select jsonb_build_array(jsonb_build_object(
+          'taskId','google-waiting','operationKey','google_metadata',
+          'articleId','${articleResolved}','articleTitle','Resolved prerequisite',
+          'articleStatus','draft','status','unscheduled','scheduled',false,
+          'updatedAt','2026-10-01T00:00:00Z','reasonCode','waiting_for_prerequisites',
+          'reason','Waiting for prerequisites','attemptCount',0,'maxAttempts',6,
+          'recoveryCount',0,'maxRecoveries',3,'manualReview',false,'runnable',false,
+          'missingFields','[]'::jsonb
+        ))
+      $$;
+      update public.automatic_article_focus set
+        article_id='${articleBlocked}', state='active', current_stage='duplicate_cleanup';
+    `);
+    await db.exec(await readFile(new URL(
+      '../supabase/migrations/20261019000000_detailed_automation_prerequisites.sql',
+      import.meta.url,
+    ), 'utf8'));
+
+    const detailedInventory = (await db.query<any>(`
+      select public.get_visible_automation_task_inventory(
+        '00000000-0000-4000-8000-000000000001'::uuid
+      ) inventory
+    `)).rows[0].inventory;
+    const detailed = detailedInventory[0];
+    assert.equal(detailed.reasonCode, 'automatic_article_focus');
+    assert.equal(detailed.blockedByArticleTitle, 'No competitors');
+    assert.equal(detailed.blockedByStage, 'duplicate_cleanup');
+    assert.equal(detailed.blockedByState, 'active');
+    assert.deepEqual(
+      detailed.requirements.map((requirement: any) => ({
+        code: requirement.code,
+        state: requirement.state,
+        current: requirement.current ?? null,
+        required: requirement.required ?? null,
+      })),
+      [
+        { code: 'google_titles', state: 'missing', current: 0, required: 2 },
+        { code: 'google_descriptions', state: 'missing', current: 0, required: 2 },
+        { code: 'automatic_article_focus', state: 'blocked', current: null, required: null },
+      ],
+    );
+    assert.equal((await db.query<{ version: number }>(`
+      select public.content_writing_automation_schema_version() version
+    `)).rows[0].version, 16);
   } finally {
     await db.close();
   }

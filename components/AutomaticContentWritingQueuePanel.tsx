@@ -32,6 +32,7 @@ import {
   retryRecoverableAutomationFailures,
   skipAutomaticArticleFocus,
   type AutomaticRecoverySchedule,
+  type AutomationTaskRequirement,
   type AutomationTaskInventoryItem,
   type ContentWritingAutomationOverview,
 } from '../utils/contentWritingAutomation';
@@ -198,6 +199,9 @@ const getTaskStatusLabel = (task: AutomationTaskInventoryItem, isArabic: boolean
   if (task.reasonCode === 'blocked_by_upstream') {
     return isArabic ? 'بانتظار المرحلة السابقة' : 'Waiting upstream';
   }
+  if (task.reasonCode === 'automatic_article_focus') {
+    return isArabic ? 'بانتظار أولوية المسار' : 'Waiting for lane priority';
+  }
   if (task.manualReview && task.status === 'failed') {
     return isArabic ? 'تحتاج مراجعة' : 'Needs review';
   }
@@ -248,8 +252,120 @@ const getAttemptLabel = (
     : `Worker runs: ${attemptCount}/${maximum}`;
 };
 
+const getRequirementLabel = (code: string, isArabic: boolean): string => {
+  const labels: Record<string, [string, string]> = {
+    primary_keyword: ['الكلمة المفتاحية الأساسية', 'Primary keyword'],
+    article_title_or_primary_keyword: ['عنوان المقالة أو الكلمة المفتاحية الأساسية', 'Article title or primary keyword'],
+    alternative_keywords: ['الصيغ البديلة', 'Alternative keyword forms'],
+    secondaries: ['الصيغ البديلة', 'Alternative keyword forms'],
+    lsi_keywords: ['كلمات LSI', 'LSI keywords'],
+    lsi: ['كلمات LSI', 'LSI keywords'],
+    google_titles: ['عناوين Google', 'Google titles'],
+    google_descriptions: ['أوصاف Google', 'Google descriptions'],
+    google_metadata: ['عناوين وأوصاف Google', 'Google titles and descriptions'],
+    competitor_urls: ['روابط المنافسين الصالحة', 'Valid competitor URLs'],
+    competitors: ['المنافسون الصالحون', 'Valid competitors'],
+    competitor_source: ['مصدر منافس صالح', 'Valid competitor source'],
+    competitor_texts: ['نصوص المنافسين الجاهزة', 'Ready competitor texts'],
+    competitor_content_or_url: ['رابط أو نص منافس صالح', 'Valid competitor URL or text'],
+    editor_text: ['نص المقالة المحفوظ', 'Saved article text'],
+    article_editor_text: ['نص المقالة المحفوظ', 'Saved article text'],
+    company_name: ['اسم الشركة', 'Company name'],
+    goal_context: ['بيانات هدف المقالة', 'Article goal details'],
+    page_type: ['نوع الصفحة', 'Page type'],
+    article_type: ['نوع المقالة', 'Article type'],
+    audience: ['الجمهور المستهدف', 'Target audience'],
+    target_audience: ['الجمهور المستهدف', 'Target audience'],
+    automatic_article_focus: ['أولوية مسار الأتمتة', 'Automation lane priority'],
+  };
+  const normalized = String(code || '').trim();
+  return labels[normalized]?.[isArabic ? 0 : 1]
+    || normalized.replaceAll('_', ' ')
+    || (isArabic ? 'متطلب غير مسمى' : 'Unnamed requirement');
+};
+
+const formatRequirementCount = (
+  requirement: NonNullable<AutomationTaskInventoryItem['requirements']>[number],
+  isArabic: boolean,
+): string => {
+  const label = getRequirementLabel(requirement.code, isArabic);
+  if (requirement.current === null || requirement.required === null) return label;
+  return `${label} ${requirement.current}/${requirement.required}`;
+};
+
+const getDetailedTaskRequirementReason = (
+  task: AutomationTaskInventoryItem,
+  isArabic: boolean,
+): string => {
+  const requirements = task.requirements || [];
+  const uniqueMissing = [...new Map(
+    requirements
+      .filter(requirement => requirement.state === 'missing')
+      .map(requirement => [requirement.code, requirement] as const),
+  ).values()];
+  const focusRequirement = requirements.find(requirement => requirement.code === 'automatic_article_focus') || null;
+  const missingFields: AutomationTaskRequirement[] = uniqueMissing.length > 0
+    ? uniqueMissing
+    : task.missingFields.map<AutomationTaskRequirement>(code => ({
+      code,
+      state: 'missing' as const,
+      current: null,
+      required: null,
+      articleId: null,
+      articleTitle: null,
+      stage: null,
+    }));
+  const sentences: string[] = [];
+
+  if (missingFields.length > 0) {
+    const list = missingFields
+      .map(requirement => formatRequirementCount(requirement, isArabic))
+      .join(isArabic ? '، ' : ', ');
+    sentences.push(isArabic
+      ? `المتطلبات أو النتائج الناقصة: ${list}.`
+      : `Missing requirements or results: ${list}.`);
+  }
+
+  const blockedArticleTitle = focusRequirement?.articleTitle || task.blockedByArticleTitle || null;
+  const blockedStage = focusRequirement?.stage || task.blockedByStage || null;
+  const blockedState = task.blockedByState || null;
+  if (focusRequirement || task.blockedByArticleId) {
+    const articlePhrase = blockedArticleTitle
+      ? (isArabic ? `المقالة «${blockedArticleTitle}»` : `article “${blockedArticleTitle}”`)
+      : (isArabic ? 'مقالة أخرى' : 'another article');
+    const stagePhrase = blockedStage
+      ? (isArabic
+        ? ` في مرحلة «${getFocusStageLabel(blockedStage, true)}»`
+        : ` at the “${getFocusStageLabel(blockedStage, false)}” stage`)
+      : '';
+    const statePhrase = blockedState
+      ? (isArabic
+        ? `، وحالتها «${getFocusStateLabel(blockedState, true)}»`
+        : `, with status “${getFocusStateLabel(blockedState, false)}”`)
+      : '';
+    const nextAction = blockedState === 'needs_attention'
+      ? (isArabic
+        ? 'لن تبدأ هذه المهمة حتى تُراجع المقالة ذات الأولوية يدويًا ثم يتحرر المسار.'
+        : 'This task cannot start until the priority article is reviewed manually and the lane is released.')
+      : (isArabic
+        ? 'ستُعاد جدولة هذه المهمة تلقائيًا بعد تحرر المسار.'
+        : 'This task will be scheduled automatically when the lane is released.');
+    sentences.push(isArabic
+      ? `سبب عدم البدء الآن: ${articlePhrase} تملك أولوية المسار${stagePhrase}${statePhrase}. ${nextAction}`
+      : `Why it cannot start now: ${articlePhrase} owns lane priority${stagePhrase}${statePhrase}. ${nextAction}`);
+  }
+
+  if (sentences.length > 0) return sentences.join(' ');
+  return isArabic
+    ? 'لم تسجّل قاعدة البيانات متطلبًا ناقصًا محددًا؛ سيعيد المحرك الرئيسي فحص المهمة في دورة التقييم التالية.'
+    : 'The database did not record a specific missing requirement; the master engine will re-evaluate the task on its next cycle.';
+};
+
 const getTaskReasonLabel = (task: AutomationTaskInventoryItem, isArabic: boolean): string => {
   const reasonCode = String(task.reasonCode || '').trim();
+  if (reasonCode === 'waiting_for_prerequisites' || reasonCode === 'automatic_article_focus') {
+    return getDetailedTaskRequirementReason(task, isArabic);
+  }
   const known: Record<string, [string, string]> = {
     execution_in_progress: ['يتم تنفيذ هذه المهمة الآن.', 'This task is running now.'],
     waiting_for_prerequisites: ['بانتظار اكتمال المتطلبات', 'Waiting for prerequisites'],

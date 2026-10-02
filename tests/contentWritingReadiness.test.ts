@@ -45,7 +45,7 @@ const createProbeClient = (options: {
       data: name === 'full_article_pipeline_schema_version'
         ? 6
         : name === 'content_writing_automation_schema_version'
-          ? 15
+          ? 16
           : [] as unknown[],
       error: name === options.failedRpc
         ? { code: 'PGRST202', message: 'Internal RPC schema detail that must stay private.' }
@@ -66,7 +66,7 @@ test('content-writing readiness checks every required schema surface', async () 
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.requiredMigrationCount, 44);
+  assert.equal(result.requiredMigrationCount, 45);
   assert.deepEqual(result.checks, {
     sessions: true,
     messages: true,

@@ -138,6 +138,16 @@ export type AutomaticRecoverySchedule = {
 
 export type AutomationTaskStatus = 'running' | 'scheduled' | 'ready' | 'unscheduled' | 'failed';
 
+export type AutomationTaskRequirement = {
+  code: string;
+  state: 'complete' | 'missing' | 'running' | 'scheduled' | 'blocked';
+  current: number | null;
+  required: number | null;
+  articleId: string | null;
+  articleTitle: string | null;
+  stage: string | null;
+};
+
 export type AutomationTaskInventoryItem = {
   taskId: string;
   operationKey: string;
@@ -171,6 +181,11 @@ export type AutomationTaskInventoryItem = {
   historicalErrorCode?: string | null;
   historicalError?: string | null;
   historicalResolvedAt?: string | null;
+  requirements?: AutomationTaskRequirement[];
+  blockedByArticleId?: string | null;
+  blockedByArticleTitle?: string | null;
+  blockedByStage?: string | null;
+  blockedByState?: string | null;
 };
 
 export type ContentWritingAutomationStatus = {
@@ -418,6 +433,11 @@ const normalizeTaskInventory = (value: unknown): AutomationTaskInventoryItem[] =
   const allowedStatuses = new Set<AutomationTaskStatus>([
     'running', 'scheduled', 'ready', 'unscheduled', 'failed',
   ]);
+  const optionalInteger = (input: unknown): number | null => (
+    input === null || input === undefined || input === '' || !Number.isFinite(Number(input))
+      ? null
+      : integer(input)
+  );
   return value.flatMap(entry => {
     if (!isRecord(entry)) return [];
     const taskId = text(entry.taskId);
@@ -425,6 +445,25 @@ const normalizeTaskInventory = (value: unknown): AutomationTaskInventoryItem[] =
     const articleId = text(entry.articleId);
     const status = text(entry.status) as AutomationTaskStatus;
     if (!taskId || !operationKey || !articleId || !allowedStatuses.has(status)) return [];
+    const requirements = Array.isArray(entry.requirements)
+      ? entry.requirements.flatMap(requirement => {
+        if (!isRecord(requirement)) return [];
+        const code = text(requirement.code);
+        const requirementState = text(requirement.state);
+        if (!code || !['complete', 'missing', 'running', 'scheduled', 'blocked'].includes(requirementState)) {
+          return [];
+        }
+        return [{
+          code,
+          state: requirementState as AutomationTaskRequirement['state'],
+          current: optionalInteger(requirement.current),
+          required: optionalInteger(requirement.required),
+          articleId: nullableText(requirement.articleId),
+          articleTitle: nullableText(requirement.articleTitle),
+          stage: nullableText(requirement.stage),
+        }];
+      })
+      : [];
     return [{
       taskId,
       operationKey,
@@ -465,6 +504,11 @@ const normalizeTaskInventory = (value: unknown): AutomationTaskInventoryItem[] =
       historicalErrorCode: nullableText(entry.historicalErrorCode),
       historicalError: nullableText(entry.historicalError),
       historicalResolvedAt: nullableText(entry.historicalResolvedAt),
+      requirements,
+      blockedByArticleId: nullableText(entry.blockedByArticleId),
+      blockedByArticleTitle: nullableText(entry.blockedByArticleTitle),
+      blockedByStage: nullableText(entry.blockedByStage),
+      blockedByState: nullableText(entry.blockedByState),
     }];
   });
 };

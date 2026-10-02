@@ -53,5 +53,5 @@ test('the automation API hides a stale trashed focus instead of rendering untitl
   assert.match(api, /lastReleaseReason: 'article_trashed'/);
   assert.match(api, /articles\(title,status,metadata\)/);
   assert.match(releaseRegistry, /20261016000000_release_trashed_article_automation\.sql/);
-  assert.match(readiness, /version < 15/);
+  assert.match(readiness, /version < 16/);
 });
