@@ -40,5 +40,6 @@ test('the public inventory treats pauses and missing prerequisites truthfully', 
   assert.match(migration, /writing_requirement->>'required'/);
   assert.match(dashboardQueue, /const waitingCount = scheduledCount \+ readyCount;/);
   assert.doesNotMatch(dashboardQueue, /scheduledCount \+ readyCount \+ unscheduledCount/);
+  assert.match(dashboardQueue, /\['ready', 'completed'\]\.includes\(computedStatus\)/);
   assert.match(panel, /غير مستوفٍ للشروط/);
 });

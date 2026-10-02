@@ -659,7 +659,7 @@ export const buildDashboardAutomationOperations = ({
       completedCount: operation.completedCount,
       failedCount: failedTasks.length,
     });
-    const status = computedStatus === 'ready' && unscheduledCount > 0
+    const status = ['ready', 'completed'].includes(computedStatus) && unscheduledCount > 0
       ? 'unknown'
       : computedStatus;
     return {
