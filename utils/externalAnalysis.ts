@@ -529,6 +529,37 @@ export const listExternalAnalysisJobs = async (
   );
 };
 
+export const loadExternalAnalysisArticleState = async (
+  articleId: string,
+): Promise<ExternalAnalysisArticleState | null> => {
+  if (!articleId.trim()) return null;
+  const { data, error } = await getSupabaseClient()
+    .from('ai_external_analysis_article_state')
+    .select('article_id,semantic_ready,external_analysis_ready,competitor_discovery_ready,semantic_readiness_signature,external_analysis_readiness_signature,competitor_discovery_signature,semantic_missing_fields,external_analysis_missing_fields,competitor_discovery_missing_fields,engineering_command_mode,custom_engineering_command_ids,external_analysis_effective_command_ids,engineering_command_selection_updated_at,updated_at')
+    .eq('article_id', articleId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as Record<string, any>;
+  return {
+    article_id: String(row.article_id),
+    semantic_ready: row.semantic_ready === true,
+    external_analysis_ready: row.external_analysis_ready === true,
+    competitor_discovery_ready: row.competitor_discovery_ready === true,
+    semantic_readiness_signature: String(row.semantic_readiness_signature || ''),
+    external_analysis_readiness_signature: String(row.external_analysis_readiness_signature || ''),
+    competitor_discovery_signature: String(row.competitor_discovery_signature || ''),
+    semantic_missing_fields: toStringList(row.semantic_missing_fields),
+    external_analysis_missing_fields: toStringList(row.external_analysis_missing_fields),
+    competitor_discovery_missing_fields: toStringList(row.competitor_discovery_missing_fields),
+    engineering_command_mode: row.engineering_command_mode === 'custom' ? 'custom' : 'default',
+    custom_engineering_command_ids: toStringList(row.custom_engineering_command_ids),
+    external_analysis_effective_command_ids: toStringList(row.external_analysis_effective_command_ids),
+    engineering_command_selection_updated_at: row.engineering_command_selection_updated_at || null,
+    updated_at: String(row.updated_at || ''),
+  };
+};
+
 export const loadExternalAnalysisJobsByIds = async (
   jobIds: readonly string[],
 ): Promise<ExternalAnalysisJobRow[]> => {

@@ -56,7 +56,7 @@ test('automatic semantic and competitor stages are lifetime-guarded while manual
   assert.match(competitor, /else greatest\(1, job\.attempt_count\)/);
 });
 
-test('automatic engineering commands are filtered by article and command across every signature and status', async () => {
+test('legacy automatic engineering commands were filtered across every signature and status', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260829000000_external_analysis_auto_once_per_article.sql',
   );
@@ -102,6 +102,41 @@ test('automatic engineering commands are filtered by article and command across 
   );
   assert.doesNotMatch(reset, /reset_external_analysis_command_preferences\(/);
   assert.match(reset, /enqueue_external_engineering_jobs_controlled\([\s\S]*v_origin/);
+});
+
+test('current-content audit migration scopes automatic command history to the readiness signature and repairs stranded drafts', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20261023000000_current_content_external_audits.sql',
+  );
+
+  assert.match(
+    migration,
+    /previous\.readiness_signature = v_state\.external_analysis_readiness_signature/,
+  );
+  assert.match(
+    migration,
+    /article_automation_work_readiness\(article\.id\)/,
+  );
+  assert.match(migration, /work\.readiness->>'state' = 'auditing'/);
+  assert.match(migration, /'activeAuditCount'/);
+  assert.match(migration, /'failedAuditCount'/);
+  assert.match(
+    migration,
+    /reconcile_automatic_ready_engineering_commands_for_article\(v_article\.id\)/,
+  );
+  assert.equal((migration.match(/\$migration\$/g) || []).length, 2);
+  assert.equal((migration.match(/\$repair\$/g) || []).length, 2);
+  assert.match(migration.trim(), /commit;$/);
+});
+
+test('external analysis log identifies historical content-version results', async () => {
+  const tab = await readWorkspaceFile('components/ExternalAnalysisResultsTab.tsx');
+  const client = await readWorkspaceFile('utils/externalAnalysis.ts');
+
+  assert.match(client, /loadExternalAnalysisArticleState/);
+  assert.match(tab, /external_analysis_readiness_signature/);
+  assert.match(tab, /نتائج النسخ السابقة محفوظة في السجل/);
+  assert.match(tab, /نسخة سابقة/);
 });
 
 test('migration stamps actual semantic runs and treats retries as explicit manual work', async () => {

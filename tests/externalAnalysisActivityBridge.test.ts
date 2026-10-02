@@ -267,7 +267,7 @@ test('editor UI wires the all-type external feed and the durable local execution
   ]);
 
   assert.match(externalClient, /job_type: normalizeExternalAnalysisJobType\(row\.job_type\)/);
-  assert.match(externalTab, /const rows = await listExternalAnalysisJobs\(articleId\)/);
+  assert.match(externalTab, /listExternalAnalysisJobs\(articleId\)/);
   assert.doesNotMatch(externalTab, /competitor_extraction['"],\s*['"]content_writing_preparation/);
   assert.match(externalTab, /جميع التحليلات الخارجية/);
   assert.match(aiContext, /window\.addEventListener\(AI_EXECUTION_ACTIVITY_EVENT, handleActivity\)/);

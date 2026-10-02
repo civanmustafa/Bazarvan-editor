@@ -26,8 +26,10 @@ import {
   EXTERNAL_ANALYSIS_ACTIVE_STATUSES,
   getExternalJobAnalysisMarkdown,
   listExternalAnalysisJobs,
+  loadExternalAnalysisArticleState,
   retryExternalAnalysisJob,
   toExternalAiPatches,
+  type ExternalAnalysisArticleState,
   type ExternalAnalysisJobRow,
   type ExternalAnalysisJobStatus,
 } from '../utils/externalAnalysis';
@@ -208,6 +210,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
   const deleteAiPatchMergeDeleteTarget = useAISelector(context => context.deleteAiPatchMergeDeleteTarget);
   const selectAiPatchMergeDeleteTarget = useAISelector(context => context.selectAiPatchMergeDeleteTarget);
   const [jobs, setJobs] = useState<ExternalAnalysisJobRow[]>([]);
+  const [articleState, setArticleState] = useState<ExternalAnalysisArticleState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<ExternalAnalysisResultFilter>('all');
@@ -231,9 +234,13 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     }
     if (showLoading) setLoading(true);
     try {
-      const rows = await listExternalAnalysisJobs(articleId);
+      const [rows, currentArticleState] = await Promise.all([
+        listExternalAnalysisJobs(articleId),
+        loadExternalAnalysisArticleState(articleId),
+      ]);
       if (refreshRequestRef.current !== requestId) return;
       setJobs(rows);
+      setArticleState(currentArticleState);
       setError('');
       setExpandedJobIds(current => {
         if (current.size > 0) return current;
@@ -255,6 +262,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
 
   useEffect(() => {
     setJobs([]);
+    setArticleState(null);
     setPatchOverrides({});
     setExpandedJobIds(new Set());
     setFilter('all');
@@ -352,6 +360,16 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
 
   const filteredJobs = useMemo(() => filterExternalAnalysisJobs(jobs, filter), [filter, jobs]);
   const batches = useMemo(() => groupExternalAnalysisJobs(filteredJobs), [filteredJobs]);
+  const isPreviousContentVersion = useCallback((job: ExternalAnalysisJobRow): boolean => (
+    job.job_type === 'engineering_command'
+    && Boolean(job.readiness_signature)
+    && Boolean(articleState?.external_analysis_readiness_signature)
+    && job.readiness_signature !== articleState?.external_analysis_readiness_signature
+  ), [articleState?.external_analysis_readiness_signature]);
+  const hasPreviousContentVersionResults = useMemo(
+    () => jobs.some(isPreviousContentVersion),
+    [isPreviousContentVersion, jobs],
+  );
 
   const formatDate = (value?: string | null): string => {
     if (!value) return '-';
@@ -957,6 +975,14 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
         </AppSelect>
       </div>
 
+      {hasPreviousContentVersionResults && (
+        <div className="border-s-2 border-amber-400 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold leading-5 text-amber-800 dark:bg-amber-900/10 dark:text-amber-200">
+          {locale === 'ar'
+            ? 'نتائج النسخ السابقة محفوظة في السجل، لكنها لا تدخل في تقدم التدقيقات للنسخة الحالية.'
+            : 'Results from previous content versions remain in the log, but do not count toward the current version audit progress.'}
+        </div>
+      )}
+
       {loading && jobs.length === 0 ? (
         <div className="flex items-center justify-center gap-2 py-10 text-sm text-[#d4af37]"><LoaderCircle size={16} className="animate-spin" /> {locale === 'ar' ? 'جار تحميل النتائج...' : 'Loading results...'}</div>
       ) : error ? (
@@ -988,6 +1014,7 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                 : [];
               const commandLabel = getJobDisplayTitle(job);
               const jobTypeLabel = getExternalAnalysisJobTypeLabel(job.job_type, locale);
+              const previousContentVersion = isPreviousContentVersion(job);
               const specificResult = renderJobSpecificResult(job);
               const hasResult = Boolean(analysis || patches.length > 0 || specificResult);
               return (
@@ -1007,6 +1034,14 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
                       </div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
                         <span className={`rounded px-1.5 py-0.5 font-black ${statusClassName(job.status)}`}>{STATUS_LABELS[job.status][locale]}</span>
+                        {previousContentVersion && (
+                          <span
+                            className="rounded bg-amber-100 px-1.5 py-0.5 font-black text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
+                            title={locale === 'ar' ? 'هذه النتيجة تخص محتوى سابقًا ولا تُحسب ضمن تقدم النسخة الحالية.' : 'This result belongs to older content and is not counted in current progress.'}
+                          >
+                            {locale === 'ar' ? 'نسخة سابقة' : 'Previous version'}
+                          </span>
+                        )}
                         {commandLabel !== jobTypeLabel && <span className="rounded bg-gray-100 px-1.5 py-0.5 font-bold dark:bg-[#333]">{jobTypeLabel}</span>}
                         <span>{formatDate(job.updated_at)}</span>
                         {job.retry_count > 0 && <span>{locale === 'ar' ? `إعادات: ${job.retry_count}` : `Retries: ${job.retry_count}`}</span>}
