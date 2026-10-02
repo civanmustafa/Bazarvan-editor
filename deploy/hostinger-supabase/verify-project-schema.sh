@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-140}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-141}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-67}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -127,8 +127,12 @@ readonly AUTOMATION_TASK_INVENTORY_FUNCTION="$(sql_scalar "select to_regprocedur
 readonly AUTOMATION_TASK_INVENTORY_PRIVILEGES="$(sql_scalar "select not has_function_privilege('anon', 'public.get_visible_automation_task_inventory(uuid)', 'execute') and not has_function_privilege('authenticated', 'public.get_visible_automation_task_inventory(uuid)', 'execute') and has_function_privilege('service_role', 'public.get_visible_automation_task_inventory(uuid)', 'execute')")"
 readonly AUTOMATION_SINGLE_MASTER_SCHEMA="$(sql_scalar "select
   position('article-automation-master-engine' in pg_get_functiondef('public.auto_requeue_recoverable_automation_failures(integer)'::regprocedure)) > 0
+  and position('release_recoverable_automatic_focus_stalls' in pg_get_functiondef('public.auto_requeue_recoverable_automation_failures(integer)'::regprocedure)) > 0
+  and to_regprocedure('public.release_recoverable_automatic_focus_stalls(integer)') is not null
+  and to_regprocedure('public.get_visible_automation_task_inventory_v13(uuid)') is not null
   and to_regprocedure('public.get_visible_automation_task_inventory_v9(uuid)') is not null
-  and position('get_visible_automation_task_inventory_v9' in pg_get_functiondef('public.get_visible_automation_task_inventory(uuid)'::regprocedure)) > 0
+  and position('get_visible_automation_task_inventory_v13' in pg_get_functiondef('public.get_visible_automation_task_inventory(uuid)'::regprocedure)) > 0
+  and position('get_visible_automation_task_inventory_v9' in pg_get_functiondef('public.get_visible_automation_task_inventory_v13(uuid)'::regprocedure)) > 0
   and position('reasonCode' in pg_get_functiondef('public.get_visible_automation_task_inventory_v9(uuid)'::regprocedure)) > 0")"
 readonly AUTOMATION_RECOVERY_SCHEDULE="$(sql_scalar "select to_regprocedure('public.get_visible_automatic_recovery_schedule(uuid)') is not null and not has_function_privilege('anon', 'public.get_visible_automatic_recovery_schedule(uuid)', 'execute') and not has_function_privilege('authenticated', 'public.get_visible_automatic_recovery_schedule(uuid)', 'execute') and has_function_privilege('service_role', 'public.get_visible_automatic_recovery_schedule(uuid)', 'execute')")"
 readonly EXTERNAL_DEPENDENCY_CHILD_GUARD="$(sql_scalar "select exists(select 1 from pg_trigger where tgname = 'enforce_external_analysis_dependency_on_child' and not tgisinternal) and to_regprocedure('public.enforce_external_analysis_dependency_on_child()') is not null")"
@@ -177,7 +181,7 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP}" == "t" ]] || fail "Semantic target stamp does not include Google metadata."
 [[ "${READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description trigger is still active."
 [[ "${READY_STATUS_META_DESCRIPTION_SETTING_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description setting still exists."
-(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 13 )) || fail "Trashed-article automation release schema is missing."
+(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 14 )) || fail "Truthful idle-lane automation release schema is missing."
 [[ "${TRASHED_ARTICLE_AUTOMATION_GUARD}" == "t" ]] || fail "Trashed articles can still own or enter automatic queues."
 [[ "${EXTERNAL_GEMINI_BUDGET_COLUMNS}" == "4" ]] || fail "External Gemini attempt/recovery budget columns are incomplete."
 [[ "${EXTERNAL_GEMINI_BUDGET_TRIGGERS}" == "t" ]] || fail "External Gemini attempt/recovery budget triggers are missing."

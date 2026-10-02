@@ -35,6 +35,7 @@ export const CONTENT_WRITING_REQUIRED_MIGRATIONS = [
   '20261014000000_finalize_unneeded_automatic_writing.sql',
   '20261014010000_clear_satisfied_writing_focus_pauses.sql',
   '20261016000000_release_trashed_article_automation.sql',
+  '20261017000000_truthful_idle_lane_and_stall_recovery.sql',
 ] as const;
 
 export const FULL_ARTICLE_PIPELINE_REQUIRED_MIGRATIONS = [

@@ -144,6 +144,52 @@ test('a disabled automation remains visible instead of disappearing from the que
   assert.equal(operations.find(operation => operation.key === 'internal_linking')?.status, 'disabled');
 });
 
+test('unscheduled prerequisite work does not occupy the active waiting lane', () => {
+  const task: AutomationTaskInventoryItem = {
+    taskId: 'external-analysis:article-1',
+    operationKey: 'external_analysis',
+    articleId: 'article-1',
+    articleTitle: 'مقالة غير جاهزة',
+    articleStatus: 'draft',
+    status: 'unscheduled',
+    scheduled: false,
+    scheduleAt: null,
+    startedAt: null,
+    readyAt: null,
+    updatedAt: '2026-10-02T00:00:00Z',
+    sourceType: 'synthetic',
+    sourceId: null,
+    priorityRank: 1,
+    reasonCode: 'missing_editor_text',
+    reason: 'Editor text is required.',
+    attemptCount: 0,
+    maxAttempts: 1,
+    missingFields: ['editor_text'],
+    usableCompetitorCount: 0,
+    minimumCompetitorCount: 2,
+    recoveryCount: 0,
+    maxRecoveries: 3,
+    manualReview: false,
+    runnable: false,
+  };
+
+  const operations = buildDashboardAutomationOperations({
+    summaries: {},
+    writingOverview: null,
+    effectivePreferences: automationDefaults,
+    articleTitles: { 'article-1': task.articleTitle },
+    articleSnapshots: {
+      'article-1': { ...readySnapshot, title: task.articleTitle, status: 'draft' },
+    },
+    taskInventory: [task],
+  });
+  const operation = operations.find(entry => entry.key === 'external_analysis');
+
+  assert.equal(operation?.unscheduledCount, 1);
+  assert.equal(operation?.waitingCount, 0);
+  assert.equal(operation?.status, 'unknown');
+});
+
 const readySnapshot = {
   title: 'أغلى جهاز كشف الذهب في العالم',
   status: 'draft',

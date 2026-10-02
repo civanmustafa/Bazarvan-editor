@@ -646,16 +646,22 @@ export const buildDashboardAutomationOperations = ({
     const readyCount = tasks.filter(task => task.status === 'ready').length;
     const unscheduledCount = tasks.filter(task => task.status === 'unscheduled').length;
     const failedTasks = tasks.filter(task => task.status === 'failed');
-    const waitingCount = scheduledCount + readyCount + unscheduledCount;
+    // "Unscheduled" means the task is still missing a prerequisite. It must
+    // not inflate the active queue or suggest that the single worker lane is
+    // occupied. Only runnable or actually scheduled work is waiting.
+    const waitingCount = scheduledCount + readyCount;
     const leadTask = tasks[0];
     const leadFailure = failedTasks[0];
-    const status = operationStatus({
+    const computedStatus = operationStatus({
       enabled: operation.enabled,
       runningCount,
       waitingCount,
       completedCount: operation.completedCount,
       failedCount: failedTasks.length,
     });
+    const status = computedStatus === 'ready' && unscheduledCount > 0
+      ? 'unknown'
+      : computedStatus;
     return {
       ...operation,
       status,

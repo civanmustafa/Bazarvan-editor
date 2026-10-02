@@ -138,7 +138,7 @@ const getOperationStatusLabel = (
   completed: isArabic ? 'مكتمل' : 'Completed',
   ready: isArabic ? 'جاهز تلقائيًا' : 'Automation ready',
   disabled: isArabic ? 'متوقف' : 'Disabled',
-  unknown: isArabic ? 'جار التحقق' : 'Checking',
+  unknown: isArabic ? 'غير مستوفٍ للشروط' : 'Requirements missing',
 })[status];
 
 const getOperationErrorMessage = (
@@ -221,6 +221,14 @@ const getTaskReasonLabel = (task: AutomationTaskInventoryItem, isArabic: boolean
     automatic_article_focus: ['بانتظار اكتمال المقالة ذات الأولوية', 'Waiting for the focused article to finish'],
     automation_disabled: ['الأتمتة معطلة لهذه المقالة أو لمنشئها.', 'Automation is disabled for this article or its creator.'],
     manual_review_required: ['أوقفت تلقائيًا ونُقلت إلى المراجعة اليدوية. عالج السبب ثم استخدم الاستئناف.', 'Automatically paused for manual review. Resolve the cause, then resume it.'],
+    manual_review_focus_stalled: ['توقف التقدم مدة طويلة. سيعيد المحرك الرئيسي تقييمها تلقائيًا عندما تصبح مرحلة قابلة للتنفيذ.', 'Progress stalled for too long. The master engine will re-evaluate it automatically when a stage becomes runnable.'],
+    manual_review_terminal_failure: ['توقفت بسبب خطأ دائم في إحدى المراحل وتحتاج مراجعة يدوية قبل الاستئناف.', 'A stage ended with a permanent failure and requires manual review before resuming.'],
+    manual_review_post_write_attention: ['اكتملت الكتابة، لكن التدقيقات اللاحقة تحتاج مراجعة يدوية.', 'Writing finished, but a downstream audit requires manual review.'],
+    missing_company_name: ['اسم الشركة مطلوب قبل بدء هذه المرحلة.', 'A company name is required before this stage can start.'],
+    missing_editor_text: ['لا يوجد نص مقال محفوظ تحتاجه هذه المرحلة.', 'This stage requires saved article text.'],
+    missing_goal_context: ['بيانات هدف المقالة أو نوع الصفحة أو الجمهور غير مكتملة.', 'The article goal, page type, or audience details are incomplete.'],
+    missing_semantic_keywords: ['الكلمات الدلالية المطلوبة لم تكتمل بعد.', 'Required semantic keywords are not complete yet.'],
+    missing_competitor_source: ['لا يوجد منافس صالح أو نص منافس جاهز لهذه المرحلة.', 'No valid competitor source or competitor text is ready for this stage.'],
     automatic_recovery_exhausted: [
       `استنفدت دورات الاسترداد التلقائي (${task.recoveryCount}/${Math.max(task.maxRecoveries, task.recoveryCount)}). تحتاج مراجعة يدوية.`,
       `Automatic recovery cycles are exhausted (${task.recoveryCount}/${Math.max(task.maxRecoveries, task.recoveryCount)}). Manual review is required.`,
@@ -558,7 +566,8 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
     const hasCounts = operation.runningCount > 0
       || operation.waitingCount > 0
       || operation.completedCount > 0
-      || operation.failedCount > 0;
+      || operation.failedCount > 0
+      || (operation.unscheduledCount || 0) > 0;
     const competitorProgress = operation.readyItemCount !== undefined && operation.totalItemCount !== undefined
       ? `${operation.readyItemCount}/${operation.totalItemCount}`
       : '';
