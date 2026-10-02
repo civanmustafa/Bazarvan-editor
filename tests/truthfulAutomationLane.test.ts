@@ -43,3 +43,36 @@ test('the public inventory treats pauses and missing prerequisites truthfully', 
   assert.match(dashboardQueue, /\['ready', 'completed'\]\.includes\(computedStatus\)/);
   assert.match(panel, /غير مستوفٍ للشروط/);
 });
+
+test('current blockers are separated from historical errors and shown once at their root stage', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20261018000000_current_blocker_and_historical_error.sql',
+  );
+  const panel = await readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx');
+  const taskNormalizer = await readWorkspaceFile('utils/contentWritingAutomation.ts');
+  const guard = await readWorkspaceFile('server/contentResearchAutomationGuard.ts');
+  const worker = await readWorkspaceFile('server/externalAnalysisWorker.ts');
+
+  assert.match(migration, /automatic_article_focus_pause_history/);
+  assert.match(migration, /automatic_focus_pause_blocker_state/);
+  assert.match(migration, /content_research_automation_changed/);
+  assert.match(migration, /reclassified_as_prerequisite_wait/);
+  assert.match(migration, /competitor_requirement_now_satisfied/);
+  assert.match(migration, /release_reclassified_automatic_focus_pauses/);
+  assert.match(migration, /defer_external_analysis_job_for_prerequisite/);
+  assert.match(migration, /attempt_count = greatest\(0, job\.attempt_count - 1\)/);
+  assert.match(migration, /resume_satisfied_automatic_prerequisite_jobs/);
+  assert.match(migration, /article-automation-master-engine/);
+  assert.doesNotMatch(migration, /cron\.schedule|pg_cron|create extension/);
+  assert.match(migration, /blocked_by_upstream/);
+  assert.match(migration, /historical_blocker_resolved/);
+  assert.match(migration, /'currentBlocker'/);
+  assert.match(migration, /'rootOperationKey'/);
+  assert.match(migration, /select 15/);
+  assert.match(taskNormalizer, /historicalResolvedAt/);
+  assert.match(panel, /خطأ تاريخي تمت معالجته/);
+  assert.match(panel, /هذه المرحلة لم تفشل/);
+  assert.match(panel, /لا تُعد محاولة تنفيذ/);
+  assert.match(guard, /ExternalAnalysisPrerequisiteError/);
+  assert.match(worker, /deferExternalAnalysisJobForPrerequisite/);
+});

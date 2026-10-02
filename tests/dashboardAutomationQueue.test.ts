@@ -190,6 +190,50 @@ test('unscheduled prerequisite work does not occupy the active waiting lane', ()
   assert.equal(operation?.status, 'unknown');
 });
 
+test('one root blocker is not duplicated as failures on dependent automation cards', () => {
+  const baseTask: AutomationTaskInventoryItem = {
+    taskId: 'root:article-1', operationKey: 'competitor_discovery', articleId: 'article-1',
+    articleTitle: 'مقالة ذات مانع واحد', articleStatus: 'draft', status: 'failed',
+    scheduled: false, scheduleAt: null, startedAt: null, readyAt: null,
+    updatedAt: '2026-10-02T00:00:00Z', sourceType: 'external_analysis', sourceId: 'root-job',
+    priorityRank: 1, reasonCode: 'manual_review_terminal_failure',
+    reason: 'No suitable competitor pages were available after automatic discovery.',
+    attemptCount: 1, maxAttempts: 6, missingFields: [], usableCompetitorCount: 0,
+    minimumCompetitorCount: 2, recoveryCount: 0, maxRecoveries: 3,
+    manualReview: true, runnable: false, currentBlocker: true,
+    blockerCategory: 'permanent', rootOperationKey: 'competitor_discovery',
+  };
+  const dependentTask: AutomationTaskInventoryItem = {
+    ...baseTask,
+    taskId: 'dependent:article-1',
+    operationKey: 'external_analysis',
+    status: 'unscheduled',
+    sourceId: null,
+    reasonCode: 'blocked_by_upstream',
+    reason: 'This stage did not fail; it is waiting for the root operation.',
+    attemptCount: 0,
+    maxAttempts: 1,
+    manualReview: false,
+  };
+  const operations = buildDashboardAutomationOperations({
+    summaries: {}, writingOverview: null, effectivePreferences: automationDefaults,
+    articleTitles: { 'article-1': baseTask.articleTitle },
+    articleSnapshots: {
+      'article-1': { ...readySnapshot, title: baseTask.articleTitle, status: 'draft' },
+    },
+    taskInventory: [baseTask, dependentTask],
+  });
+
+  const discovery = operations.find(operation => operation.key === 'competitor_discovery');
+  const external = operations.find(operation => operation.key === 'external_analysis');
+  assert.equal(discovery?.failedCount, 1);
+  assert.equal(discovery?.status, 'attention');
+  assert.equal(external?.failedCount, 0);
+  assert.equal(external?.unscheduledCount, 1);
+  assert.equal(external?.status, 'unknown');
+  assert.equal(countDashboardAutomationIssues(operations), 1);
+});
+
 const readySnapshot = {
   title: 'أغلى جهاز كشف الذهب في العالم',
   status: 'draft',

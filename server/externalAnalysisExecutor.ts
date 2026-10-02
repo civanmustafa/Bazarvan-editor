@@ -63,6 +63,27 @@ export class ExternalAnalysisTerminalError extends Error {
   }
 }
 
+/**
+ * The job is valid, but an upstream automatic stage has not finished yet.
+ * The worker returns it to the prerequisite queue without consuming an
+ * execution attempt or creating a manual-review failure.
+ */
+export class ExternalAnalysisPrerequisiteError extends Error {
+  readonly code: string;
+  readonly progress: ExternalAnalysisJson;
+
+  constructor(options: {
+    message: string;
+    code: string;
+    progress?: ExternalAnalysisJson;
+  }) {
+    super(options.message);
+    this.name = 'ExternalAnalysisPrerequisiteError';
+    this.code = options.code;
+    this.progress = options.progress ?? {};
+  }
+}
+
 export class ExternalAnalysisBlockedError extends Error {
   readonly code: string;
   readonly progress: ExternalAnalysisJson;

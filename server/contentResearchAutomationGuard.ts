@@ -1,4 +1,5 @@
 import {
+  ExternalAnalysisPrerequisiteError,
   ExternalAnalysisTerminalError,
 } from './externalAnalysisExecutor';
 import {
@@ -128,9 +129,13 @@ export const assertAutomaticCompetitorResearchAllowed = async (
     || (settings.autoGenerateAlternativeKeywords && !alternativesReady)
     || (settings.autoGenerateLsiKeywords && !lsiReady)
   ) {
-    stopAutomaticCompetitorResearch(
-      'content_research_automation_changed',
-      'Automatic competitor work is waiting for every enabled keyword stage.',
-    );
+    throw new ExternalAnalysisPrerequisiteError({
+      code: 'content_research_automation_changed',
+      message: 'Automatic competitor work is waiting for every enabled keyword stage.',
+      progress: {
+        stage: 'waiting_for_prerequisites',
+        blockedBy: 'semantic_keywords',
+      },
+    });
   }
 };

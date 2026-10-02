@@ -215,6 +215,25 @@ export const blockExternalAnalysisJob = async (options: {
   return job;
 };
 
+export const deferExternalAnalysisJobForPrerequisite = async (options: {
+  jobId: string;
+  workerId: string;
+  errorCode: string;
+  errorMessage: string;
+  progress?: ExternalAnalysisJson;
+}): Promise<ExternalAnalysisJob> => {
+  const data = await callQueueRpc<unknown>('defer_external_analysis_job_for_prerequisite', {
+    p_job_id: options.jobId,
+    p_worker_id: options.workerId,
+    p_error_code: options.errorCode,
+    p_error_message: options.errorMessage,
+    p_progress: options.progress ?? {},
+  });
+  const job = firstJob(data);
+  if (!job) throw new Error('Prerequisite deferral RPC returned no external analysis job.');
+  return job;
+};
+
 export const deadLetterExternalAnalysisJob = async (options: {
   jobId: string;
   workerId: string;

@@ -165,6 +165,12 @@ export type AutomationTaskInventoryItem = {
   maxRecoveries: number;
   manualReview: boolean;
   runnable: boolean;
+  currentBlocker?: boolean | null;
+  blockerCategory?: 'waiting_prerequisite' | 'transient' | 'permanent' | 'resolved' | null;
+  rootOperationKey?: string | null;
+  historicalErrorCode?: string | null;
+  historicalError?: string | null;
+  historicalResolvedAt?: string | null;
 };
 
 export type ContentWritingAutomationStatus = {
@@ -450,6 +456,15 @@ const normalizeTaskInventory = (value: unknown): AutomationTaskInventoryItem[] =
       maxRecoveries: Math.max(0, integer(entry.maxRecoveries)),
       manualReview: entry.manualReview === true,
       runnable: entry.runnable === true || status === 'ready',
+      currentBlocker: typeof entry.currentBlocker === 'boolean' ? entry.currentBlocker : null,
+      blockerCategory: ['waiting_prerequisite', 'transient', 'permanent', 'resolved']
+        .includes(text(entry.blockerCategory))
+        ? text(entry.blockerCategory) as AutomationTaskInventoryItem['blockerCategory']
+        : null,
+      rootOperationKey: nullableText(entry.rootOperationKey),
+      historicalErrorCode: nullableText(entry.historicalErrorCode),
+      historicalError: nullableText(entry.historicalError),
+      historicalResolvedAt: nullableText(entry.historicalResolvedAt),
     }];
   });
 };

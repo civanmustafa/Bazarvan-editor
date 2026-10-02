@@ -17,6 +17,7 @@ import {
   cancelExternalEngineeringBundle,
   claimNextExternalAnalysisJob,
   completeExternalAnalysisJob,
+  deferExternalAnalysisJobForPrerequisite,
   finalizeExternalAnalysisJobCancel,
   heartbeatExternalAnalysisJob,
   getExternalAnalysisSupabaseAdmin,
@@ -32,6 +33,7 @@ import {
 import {
   ExternalAnalysisBlockedError,
   ExternalAnalysisOwnershipLostError,
+  ExternalAnalysisPrerequisiteError,
   ExternalAnalysisRetryError,
   ExternalAnalysisTerminalError,
   getExternalAnalysisJobExecutor,
@@ -300,6 +302,24 @@ const executeClaimedJob = async (
         console.log(`[external-analysis-worker] Cancelled job ${job.id} (${job.job_type}).`);
       } catch (cancelError) {
         logThrottledError(`Could not finalize cancellation for job ${job.id}`, cancelError);
+      }
+      return;
+    }
+
+    if (error instanceof ExternalAnalysisPrerequisiteError) {
+      try {
+        await deferExternalAnalysisJobForPrerequisite({
+          jobId: job.id,
+          workerId: slotWorkerId,
+          errorCode: error.code,
+          errorMessage: error.message,
+          progress: error.progress,
+        });
+        console.log(
+          `[external-analysis-worker] Deferred job ${job.id} (${job.job_type}) until its prerequisite is ready; reason=${error.code}.`,
+        );
+      } catch (prerequisiteError) {
+        logThrottledError(`Could not defer prerequisite job ${job.id}`, prerequisiteError);
       }
       return;
     }

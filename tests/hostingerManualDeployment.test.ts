@@ -43,9 +43,9 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-141/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-141/);
-  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=141/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-142/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-142/);
+  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=142/);
   assert.match(deployScript, /verify-project-schema\.sh/);
   assert.match(verifyScript, /get_visible_automation_task_inventory_v13/);
   assert.match(verifyScript, /release_recoverable_automatic_focus_stalls/);
@@ -62,6 +62,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20261015000000_normalize_dashboard_search\.sql/);
   assert.match(guide, /20261016000000_release_trashed_article_automation\.sql/);
   assert.match(guide, /20261017000000_truthful_idle_lane_and_stall_recovery\.sql/);
+  assert.match(guide, /20261018000000_current_blocker_and_historical_error\.sql/);
   assert.match(guide, /20261011000000_visible_automatic_recovery_schedule\.sql/);
   assert.match(guide, /20261003000000_automation_inventory_completion_and_auto_recovery\.sql/);
   assert.match(guide, /20261002000000_visible_automation_task_inventory\.sql/);
@@ -100,7 +101,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20260904000000_preserve_manual_competitor_extraction\.sql/);
   assert.match(verifyScript, /MANUAL_COMPETITOR_EXTRACTION_PRIVILEGES/);
   assert.match(guide, /20260903000000_manual_google_metadata\.sql/);
-  assert.match(verifyScript, /EXPECTED_PUBLIC_TABLES:-67/);
+  assert.match(verifyScript, /EXPECTED_PUBLIC_TABLES:-68/);
   assert.match(verifyScript, /ARTICLE_COMPETITOR_SOURCE_POLICY/);
   assert.match(verifyScript, /AUTOMATION_COORDINATOR_TABLES/);
   assert.match(verifyScript, /AUTOMATION_COORDINATOR_FUNCTION/);

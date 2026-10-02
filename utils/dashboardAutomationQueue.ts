@@ -676,7 +676,7 @@ export const buildDashboardAutomationOperations = ({
       articleId: leadTask.articleId,
       articleTitle: leadTask.articleTitle || articleTitles[leadTask.articleId] || leadTask.articleId,
       latestJobStatus: leadTask.status,
-      errorCode: leadFailure?.reason || '',
+      errorCode: leadFailure?.reasonCode || '',
       errorMessage: leadFailure?.reason || '',
       attemptCount: leadTask.attemptCount,
       maxAttempts: leadTask.maxAttempts,

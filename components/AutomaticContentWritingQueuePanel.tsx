@@ -145,8 +145,25 @@ const getOperationErrorMessage = (
   operation: DashboardAutomationOperation,
   isArabic: boolean,
 ): string => {
-  const raw = String(operation.errorMessage || operation.errorCode || '').trim();
+  const original = String(operation.errorMessage || operation.errorCode || '').trim();
+  const wrapped = original.match(/last error:\s*(.+)$/i)?.[1]?.trim();
+  const raw = wrapped || original;
   const normalized = `${operation.errorCode} ${raw}`.toLowerCase();
+  if (/content_research_automation_changed|waiting for every enabled keyword stage/.test(normalized)) {
+    return isArabic
+      ? 'تنتظر هذه المرحلة اكتمال الصيغ البديلة وLSI وبيانات Google المفعّلة؛ لا تُعد محاولة تنفيذ.'
+      : 'This stage is waiting for the enabled alternatives, LSI, and Google metadata; it is not an execution attempt.';
+  }
+  if (/content_writing_no_competitors_found|no suitable competitor|no valid competitor/.test(normalized)) {
+    return isArabic
+      ? 'لم يعثر البحث على العدد المطلوب من صفحات المنافسين الصالحة. أضف منافسًا صالحًا أو عدّل عبارة البحث.'
+      : 'Discovery did not find the required number of valid competitor pages. Add a valid competitor or adjust the query.';
+  }
+  if (/keys?.*(temporar|unavailable)|key availability|bounded wait/.test(normalized)) {
+    return isArabic
+      ? 'لم يتوفر مفتاح مؤهل خلال مهلة الانتظار. لا تُحسب الفحوص التي لم تصل إلى Gemini كطلبات فعلية.'
+      : 'No eligible key became available within the bounded wait. Checks that did not reach Gemini are not counted as actual requests.';
+  }
   if (/429|cooldown|quota|rate.?limit/.test(normalized)) {
     return isArabic
       ? 'بلغ مزود الذكاء الاصطناعي حد الاستخدام. راجع الحصة وأعد المحاولة بعد التهدئة.'
@@ -175,6 +192,12 @@ const TASK_STATUS_STYLE: Record<AutomationTaskInventoryItem['status'], string> =
 };
 
 const getTaskStatusLabel = (task: AutomationTaskInventoryItem, isArabic: boolean): string => {
+  if (task.reasonCode === 'historical_blocker_resolved') {
+    return isArabic ? 'قيد إعادة التقييم' : 'Re-evaluating';
+  }
+  if (task.reasonCode === 'blocked_by_upstream') {
+    return isArabic ? 'بانتظار المرحلة السابقة' : 'Waiting upstream';
+  }
   if (task.manualReview && task.status === 'failed') {
     return isArabic ? 'تحتاج مراجعة' : 'Needs review';
   }
@@ -185,6 +208,22 @@ const getTaskStatusLabel = (task: AutomationTaskInventoryItem, isArabic: boolean
     unscheduled: isArabic ? 'بانتظار متطلبات' : 'Waiting for requirements',
     failed: isArabic ? 'متعثرة' : 'Failed',
   })[task.status];
+};
+
+const getRootOperationLabel = (operationKey: string | null | undefined, isArabic: boolean): string => {
+  const labels: Record<string, [string, string]> = {
+    semantic_keywords: ['الصيغ البديلة وLSI وبيانات Google', 'Alternatives, LSI, and Google metadata'],
+    alternative_keywords: ['الصيغ البديلة', 'Alternative forms'],
+    lsi_keywords: ['كلمات LSI', 'LSI keywords'],
+    google_metadata: ['عناوين وأوصاف Google', 'Google titles and descriptions'],
+    competitor_discovery: ['بحث المنافسين', 'Competitor discovery'],
+    competitor_extraction: ['سحب نصوص المنافسين', 'Competitor extraction'],
+    content_writing: ['كتابة المقالة', 'Article writing'],
+    duplicate_suggestions: ['اقتراحات التكرار', 'Duplicate suggestions'],
+    external_analysis: ['التحليل الخارجي', 'External analysis'],
+  };
+  const normalized = String(operationKey || '').trim();
+  return labels[normalized]?.[isArabic ? 0 : 1] || normalized;
 };
 
 const getAttemptLabel = (
@@ -224,6 +263,14 @@ const getTaskReasonLabel = (task: AutomationTaskInventoryItem, isArabic: boolean
     manual_review_focus_stalled: ['توقف التقدم مدة طويلة. سيعيد المحرك الرئيسي تقييمها تلقائيًا عندما تصبح مرحلة قابلة للتنفيذ.', 'Progress stalled for too long. The master engine will re-evaluate it automatically when a stage becomes runnable.'],
     manual_review_terminal_failure: ['توقفت بسبب خطأ دائم في إحدى المراحل وتحتاج مراجعة يدوية قبل الاستئناف.', 'A stage ended with a permanent failure and requires manual review before resuming.'],
     manual_review_post_write_attention: ['اكتملت الكتابة، لكن التدقيقات اللاحقة تحتاج مراجعة يدوية.', 'Writing finished, but a downstream audit requires manual review.'],
+    blocked_by_upstream: [
+      `هذه المرحلة لم تفشل؛ تنتظر معالجة المانع في «${getRootOperationLabel(task.rootOperationKey, true)}».`,
+      `This stage did not fail; it is waiting for the blocker in “${getRootOperationLabel(task.rootOperationKey, false)}”.`,
+    ],
+    historical_blocker_resolved: [
+      'لم يعد المانع السابق موجودًا؛ سيعيد المحرك الرئيسي جدولة المرحلة في دورة التقييم التالية.',
+      'The previous blocker no longer exists; the master engine will reconcile this stage on its next cycle.',
+    ],
     missing_company_name: ['اسم الشركة مطلوب قبل بدء هذه المرحلة.', 'A company name is required before this stage can start.'],
     missing_editor_text: ['لا يوجد نص مقال محفوظ تحتاجه هذه المرحلة.', 'This stage requires saved article text.'],
     missing_goal_context: ['بيانات هدف المقالة أو نوع الصفحة أو الجمهور غير مكتملة.', 'The article goal, page type, or audience details are incomplete.'],
@@ -984,6 +1031,24 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                     const dateDetails = taskDateDetails(task, isArabic);
                     const reason = getTaskReasonLabel(task, isArabic);
                     const rawReason = String(task.reason || '').trim();
+                    const localizedRawReason = rawReason
+                      ? getOperationErrorMessage({
+                        key: expandedOperation.key,
+                        issueGroup: '',
+                        issueIds: [],
+                        enabled: true,
+                        status: 'attention',
+                        runningCount: 0,
+                        waitingCount: 0,
+                        completedCount: 0,
+                        failedCount: 1,
+                        articleId: task.articleId,
+                        articleTitle: task.articleTitle,
+                        latestJobStatus: task.status,
+                        errorCode: task.reasonCode || '',
+                        errorMessage: rawReason,
+                      }, isArabic)
+                      : '';
                     return (
                       <button
                         key={task.taskId}
@@ -1023,9 +1088,25 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                               {reason}
                             </span>
                           )}
-                          {rawReason && rawReason !== reason && (
+                          {localizedRawReason && localizedRawReason !== reason
+                            && !['blocked_by_upstream', 'historical_blocker_resolved', 'waiting_for_prerequisites']
+                              .includes(String(task.reasonCode || '')) && (
                             <span className="mt-1 line-clamp-3 block text-[9px] font-semibold leading-4 text-gray-400 dark:text-gray-500">
-                              {isArabic ? 'تفصيل آخر محاولة: ' : 'Last-attempt detail: '}{rawReason}
+                              {isArabic ? 'تفصيل آخر محاولة: ' : 'Last-attempt detail: '}{localizedRawReason}
+                            </span>
+                          )}
+                          {task.historicalError && task.historicalResolvedAt && (
+                            <span className="mt-1 block text-[9px] font-semibold leading-4 text-emerald-600 dark:text-emerald-300">
+                              {isArabic ? 'خطأ تاريخي تمت معالجته: ' : 'Resolved historical error: '}
+                              {getOperationErrorMessage({
+                                key: expandedOperation.key,
+                                issueGroup: '', issueIds: [], enabled: true, status: 'completed',
+                                runningCount: 0, waitingCount: 0, completedCount: 1, failedCount: 0,
+                                articleId: task.articleId, articleTitle: task.articleTitle,
+                                latestJobStatus: 'resolved_current_state',
+                                errorCode: task.historicalErrorCode || '',
+                                errorMessage: task.historicalError,
+                              }, isArabic)}
                             </span>
                           )}
                           {(task.attemptCount > 0 || task.status === 'failed') && (

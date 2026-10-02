@@ -51,7 +51,13 @@ const createFixture = () => {
       enabled: true, contentWritingAutomationEnabled: true,
       autoDiscoverCompetitors: true, autoExtractCompetitorContent: true,
     },
-    item: { id: 'item-1', article_id: 'article-1', requested_by: 'creator-a', provider: 'gemini', run_generation: 1, session_sequence: 1 },
+    item: {
+      id: 'item-1', article_id: 'article-1', requested_by: 'creator-a',
+      status: 'claiming', readiness_signature: 'ready-v1',
+      usable_competitor_count: 2, pending_competitor_count: 0,
+      provider: 'gemini', model: '', run_generation: 1, session_sequence: 1,
+      attempt_count: 1, max_attempts: 6,
+    },
     readPolicy: async () => state.policy,
     readQuery: (query: any) => {
       if (query.table === 'app_settings') return { value: { contentWritingAutomationEnabled: true } };
