@@ -472,6 +472,55 @@ const getFocusStageLabel = (stage: string | null, isArabic: boolean): string => 
     || (normalized || (isArabic ? 'تجهيز المدخلات' : 'Preparing inputs'));
 };
 
+const getFocusStageDetail = (
+  focus: NonNullable<ContentWritingAutomationOverview['focus']>,
+  isArabic: boolean,
+): string | null => {
+  const auditProgress = `${focus.completedAuditCount}/${focus.requiredAuditCount}`;
+  if (focus.currentStage === 'duplicate_cleanup') {
+    if (isArabic) {
+      return `${focus.cleanupActive ? 'إصلاح التكرارات جارٍ الآن' : 'إصلاح التكرارات بانتظار التشغيل'}؛ بعده التدقيقات الخارجية ${auditProgress}.`;
+    }
+    return `${focus.cleanupActive ? 'Duplicate cleanup is running now' : 'Duplicate cleanup is waiting to run'}; external audits follow (${auditProgress}).`;
+  }
+  if (focus.currentStage === 'external_audits') {
+    if (isArabic) {
+      return `التدقيقات الخارجية: اكتمل ${auditProgress}، النشط ${focus.activeAuditCount}، والمتعثر ${focus.failedAuditCount}.`;
+    }
+    return `External audits: ${auditProgress} completed, ${focus.activeAuditCount} active, ${focus.failedAuditCount} blocked.`;
+  }
+  if (focus.currentStage === 'content_writing') {
+    return isArabic
+      ? 'جلسة كتابة المحتوى هي المهمة النشطة فعليًا الآن.'
+      : 'The content-writing session is the task that is actually active now.';
+  }
+  if (focus.currentStage === 'preparation') {
+    return isArabic
+      ? 'المحرك يجهز المهمة التالية لهذه المقالة؛ لا توجد مرحلة خارجية نشطة باسم مختلف الآن.'
+      : 'The engine is preparing this article’s next task; no differently named external stage is active now.';
+  }
+  return null;
+};
+
+const getFocusQualityDetail = (
+  focus: NonNullable<ContentWritingAutomationOverview['focus']>,
+  isArabic: boolean,
+): string | null => {
+  if (!focus.qualityOverridden || focus.qualityPassed !== false) return null;
+  const score = focus.qualityScore === null ? null : Math.round(focus.qualityScore * 10) / 10;
+  const minimum = focus.qualityMinimumScore === null
+    ? null
+    : Math.round(focus.qualityMinimumScore * 10) / 10;
+  const result = score === null
+    ? ''
+    : minimum === null
+      ? ` (${score})`
+      : ` (${score}/${minimum})`;
+  return isArabic
+    ? `أُدرج المحتوى بتجاوز الجودة${result}؛ النتيجة لم تجتز السياسة الأصلية.`
+    : `Content was inserted with a quality override${result}; the result did not pass the original policy.`;
+};
+
 const getFocusStateLabel = (state: string, isArabic: boolean): string => ({
   idle: isArabic ? 'المسار متاح' : 'Lane available',
   active: isArabic ? 'قيد التنفيذ' : 'In progress',
@@ -1004,6 +1053,22 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                 {overview.focus.acquiredAt && Number.isFinite(Date.parse(overview.focus.acquiredAt)) && (
                   <span>{isArabic ? 'بدأت:' : 'Started:'} {new Date(overview.focus.acquiredAt).toLocaleString(isArabic ? 'ar' : 'en')}</span>
                 )}
+              </div>
+            )}
+            {overview.focus.articleId && overview.focus.articleVisible && getFocusStageDetail(overview.focus, isArabic) && (
+              <div
+                data-automatic-focus-stage-detail="true"
+                className="mt-1.5 rounded-md border border-blue-200/80 bg-white/70 px-2 py-1.5 text-[9px] font-bold leading-4 text-blue-800 dark:border-blue-900/60 dark:bg-gray-950/30 dark:text-blue-200"
+              >
+                {getFocusStageDetail(overview.focus, isArabic)}
+              </div>
+            )}
+            {overview.focus.articleId && overview.focus.articleVisible && getFocusQualityDetail(overview.focus, isArabic) && (
+              <div
+                data-automatic-focus-quality-detail="true"
+                className="mt-1.5 rounded-md border border-amber-200 bg-amber-50/80 px-2 py-1.5 text-[9px] font-bold leading-4 text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/10 dark:text-amber-200"
+              >
+                {getFocusQualityDetail(overview.focus, isArabic)}
               </div>
             )}
             {overview.focus.articleId && (

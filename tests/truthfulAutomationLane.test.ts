@@ -116,3 +116,26 @@ test('same-article prerequisite waits expose the running or scheduled upstream s
   assert.match(taskNormalizer, /upstreamStage/);
   assert.match(taskNormalizer, /upstreamState/);
 });
+
+test('post-write focus ignores historical jobs and cleans obsolete preparation work', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20261022000000_truthful_post_write_focus.sql',
+  );
+  const api = await readWorkspaceFile('api/contentWritingAutomation.ts');
+  const panel = await readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx');
+  const taskNormalizer = await readWorkspaceFile('utils/contentWritingAutomation.ts');
+
+  assert.match(migration, /automatic_article_active_stage/);
+  assert.match(migration, /job\.status in \('waiting_for_prerequisites', 'queued', 'running', 'retry_scheduled', 'paused'\)/);
+  assert.match(migration, /job\.cancel_requested_at is null/);
+  assert.match(migration, /cancel_obsolete_content_writing_preparations/);
+  assert.match(migration, /job\.job_type = 'content_writing_preparation'/);
+  assert.match(migration, /'blocked'/);
+  assert.match(migration, /'qualityOverridden'/);
+  assert.match(migration, /select 18/);
+  assert.match(api, /qualityOverridden/);
+  assert.match(taskNormalizer, /requiredAuditCount/);
+  assert.match(panel, /إصلاح التكرارات جارٍ الآن/);
+  assert.match(panel, /النتيجة لم تجتز السياسة الأصلية/);
+  assert.match(panel, /data-automatic-focus-stage-detail/);
+});

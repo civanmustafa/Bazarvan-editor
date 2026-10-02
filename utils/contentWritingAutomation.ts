@@ -91,6 +91,17 @@ export type AutomaticArticleFocus = {
   articleVisible: boolean;
   state: 'idle' | 'active' | 'waiting_retry' | 'needs_attention';
   currentStage: string | null;
+  workState: string | null;
+  cleanupActive: boolean;
+  cleanupFailed: boolean;
+  requiredAuditCount: number;
+  completedAuditCount: number;
+  activeAuditCount: number;
+  failedAuditCount: number;
+  qualityScore: number | null;
+  qualityMinimumScore: number | null;
+  qualityPassed: boolean | null;
+  qualityOverridden: boolean;
   acquiredAt: string | null;
   lastProgressAt: string | null;
   nextRetryAt: string | null;
@@ -392,6 +403,22 @@ const normalizeOverview = (value: unknown): ContentWritingAutomationOverview => 
       articleVisible: focus.articleVisible !== false,
       state: focusState as AutomaticArticleFocus['state'],
       currentStage: nullableText(focus.currentStage),
+      workState: nullableText(focus.workState),
+      cleanupActive: focus.cleanupActive === true,
+      cleanupFailed: focus.cleanupFailed === true,
+      requiredAuditCount: Math.max(0, integer(focus.requiredAuditCount)),
+      completedAuditCount: Math.max(0, integer(focus.completedAuditCount)),
+      activeAuditCount: Math.max(0, integer(focus.activeAuditCount)),
+      failedAuditCount: Math.max(0, integer(focus.failedAuditCount)),
+      qualityScore: typeof focus.qualityScore === 'number' && Number.isFinite(focus.qualityScore)
+        ? focus.qualityScore
+        : null,
+      qualityMinimumScore: typeof focus.qualityMinimumScore === 'number'
+        && Number.isFinite(focus.qualityMinimumScore)
+        ? focus.qualityMinimumScore
+        : null,
+      qualityPassed: typeof focus.qualityPassed === 'boolean' ? focus.qualityPassed : null,
+      qualityOverridden: focus.qualityOverridden === true,
       acquiredAt: nullableText(focus.acquiredAt),
       lastProgressAt: nullableText(focus.lastProgressAt),
       nextRetryAt: nullableText(focus.nextRetryAt),

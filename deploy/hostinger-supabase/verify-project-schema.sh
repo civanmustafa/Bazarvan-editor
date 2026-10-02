@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-145}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-146}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-69}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -88,6 +88,12 @@ readonly UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP="$(sql_scalar "select position('go
 readonly READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED="$(sql_scalar "select not exists(select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'articles' and t.tgname = 'enqueue_article_meta_description_from_article' and not t.tgisinternal)")"
 readonly READY_STATUS_META_DESCRIPTION_SETTING_RETIRED="$(sql_scalar "select coalesce(not (value ? 'autoGenerateMetaDescription'), true) from public.app_settings where key = 'system' and not is_secret limit 1")"
 readonly AUTOMATIC_WRITING_SCHEMA_VERSION="$(sql_scalar "select coalesce(public.content_writing_automation_schema_version(), 0)")"
+readonly TRUTHFUL_POST_WRITE_FOCUS="$(sql_scalar "select
+  to_regprocedure('public.automatic_article_active_stage(uuid)') is not null
+  and to_regprocedure('public.cancel_obsolete_content_writing_preparations(uuid)') is not null
+  and exists(select 1 from pg_trigger where tgname = 'finalize_obsolete_content_writing_preparations' and not tgisinternal)
+  and position('cancel_requested_at is null' in pg_get_functiondef('public.automatic_article_active_stage(uuid)'::regprocedure)) > 0
+  and position('qualityOverridden' in pg_get_functiondef('public.get_automatic_article_focus()'::regprocedure)) > 0")"
 readonly TRASHED_ARTICLE_AUTOMATION_GUARD="$(sql_scalar "select
   to_regprocedure('public.article_is_globally_trashed(uuid)') is not null
   and exists(select 1 from pg_trigger where tgname = 'release_trashed_article_automation_after_update' and not tgisinternal)
@@ -202,7 +208,8 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP}" == "t" ]] || fail "Semantic target stamp does not include Google metadata."
 [[ "${READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description trigger is still active."
 [[ "${READY_STATUS_META_DESCRIPTION_SETTING_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description setting still exists."
-(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 17 )) || fail "Detailed-prerequisite automation schema is missing."
+(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 18 )) || fail "Truthful post-write focus automation schema is missing."
+[[ "${TRUTHFUL_POST_WRITE_FOCUS}" == "t" ]] || fail "Truthful post-write focus or obsolete preparation cleanup is missing."
 [[ "${TRASHED_ARTICLE_AUTOMATION_GUARD}" == "t" ]] || fail "Trashed articles can still own or enter automatic queues."
 [[ "${EXTERNAL_GEMINI_BUDGET_COLUMNS}" == "4" ]] || fail "External Gemini attempt/recovery budget columns are incomplete."
 [[ "${EXTERNAL_GEMINI_BUDGET_TRIGGERS}" == "t" ]] || fail "External Gemini attempt/recovery budget triggers are missing."
