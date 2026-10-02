@@ -186,6 +186,8 @@ export type AutomationTaskInventoryItem = {
   blockedByArticleTitle?: string | null;
   blockedByStage?: string | null;
   blockedByState?: string | null;
+  upstreamStage?: string | null;
+  upstreamState?: string | null;
 };
 
 export type ContentWritingAutomationStatus = {
@@ -509,6 +511,8 @@ const normalizeTaskInventory = (value: unknown): AutomationTaskInventoryItem[] =
       blockedByArticleTitle: nullableText(entry.blockedByArticleTitle),
       blockedByStage: nullableText(entry.blockedByStage),
       blockedByState: nullableText(entry.blockedByState),
+      upstreamStage: nullableText(entry.upstreamStage),
+      upstreamState: nullableText(entry.upstreamState),
     }];
   });
 };

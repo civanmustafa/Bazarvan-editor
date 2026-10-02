@@ -277,6 +277,44 @@ test('current blocker migration releases stale prerequisites and reports only on
     assert.equal((await db.query<{ version: number }>(`
       select public.content_writing_automation_schema_version() version
     `)).rows[0].version, 16);
+
+    await db.exec(`
+      create or replace function public.get_visible_automation_task_inventory(p_requested_by uuid)
+      returns jsonb language sql stable as $$
+        select jsonb_build_array(jsonb_build_object(
+          'taskId','external-waiting','operationKey','external_analysis',
+          'articleId','${articleResolved}','articleTitle','Resolved prerequisite',
+          'articleStatus','draft','status','unscheduled','scheduled',false,
+          'updatedAt','2026-10-01T00:00:00Z','reasonCode','waiting_for_prerequisites',
+          'reason','Waiting for prerequisites','attemptCount',0,'maxAttempts',1,
+          'recoveryCount',0,'maxRecoveries',3,'manualReview',false,'runnable',false,
+          'missingFields','[]'::jsonb,'requirements','[]'::jsonb
+        ))
+      $$;
+      update public.automatic_article_focus set
+        article_id='${articleResolved}', state='active', current_stage='content_writing';
+    `);
+    await db.exec(await readFile(new URL(
+      '../supabase/migrations/20261020000000_detailed_upstream_stage_state.sql',
+      import.meta.url,
+    ), 'utf8'));
+
+    const upstreamInventory = (await db.query<any>(`
+      select public.get_visible_automation_task_inventory(
+        '00000000-0000-4000-8000-000000000001'::uuid
+      ) inventory
+    `)).rows[0].inventory;
+    assert.equal(upstreamInventory[0].upstreamStage, 'content_writing');
+    assert.equal(upstreamInventory[0].upstreamState, 'active');
+    assert.deepEqual(upstreamInventory[0].requirements, [{
+      code: 'content_writing',
+      state: 'running',
+      articleId: articleResolved,
+      stage: 'content_writing',
+    }]);
+    assert.equal((await db.query<{ version: number }>(`
+      select public.content_writing_automation_schema_version() version
+    `)).rows[0].version, 17);
   } finally {
     await db.close();
   }

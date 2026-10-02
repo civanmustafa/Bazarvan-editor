@@ -97,3 +97,22 @@ test('unfinished task cards name exact requirements and the article holding lane
   assert.match(taskNormalizer, /blockedByArticleTitle/);
   assert.match(taskNormalizer, /blockedByState/);
 });
+
+test('same-article prerequisite waits expose the running or scheduled upstream stage', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20261020000000_detailed_upstream_stage_state.sql',
+  );
+  const panel = await readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx');
+  const taskNormalizer = await readWorkspaceFile('utils/contentWritingAutomation.ts');
+
+  assert.match(migration, /rename to get_visible_automation_task_inventory_v16/);
+  assert.match(migration, /'upstreamStage'/);
+  assert.match(migration, /when 'active' then 'running'/);
+  assert.match(migration, /when 'waiting_retry' then 'scheduled'/);
+  assert.match(migration, /select 17/);
+  assert.match(panel, /المرحلة السابقة الجارية الآن/);
+  assert.match(panel, /المرحلة السابقة بانتظار إعادة محاولة مجدولة/);
+  assert.match(panel, /المرحلة السابقة متوقفة وتحتاج مراجعة/);
+  assert.match(taskNormalizer, /upstreamStage/);
+  assert.match(taskNormalizer, /upstreamState/);
+});

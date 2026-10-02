@@ -277,6 +277,14 @@ const getRequirementLabel = (code: string, isArabic: boolean): string => {
     audience: ['الجمهور المستهدف', 'Target audience'],
     target_audience: ['الجمهور المستهدف', 'Target audience'],
     automatic_article_focus: ['أولوية مسار الأتمتة', 'Automation lane priority'],
+    preparation: ['تجهيز المدخلات', 'Input preparation'],
+    semantic_keywords: ['الصيغ البديلة والدلالات وبيانات Google', 'Keywords, semantics, and Google metadata'],
+    competitor_discovery: ['اكتشاف المنافسين', 'Competitor discovery'],
+    competitor_extraction: ['سحب نصوص المنافسين', 'Competitor extraction'],
+    competitor_preparation: ['استكمال جاهزية المنافسين', 'Competitor preparation'],
+    content_writing: ['كتابة المقالة', 'Article writing'],
+    duplicate_cleanup: ['إصلاح التكرارات', 'Duplicate cleanup'],
+    external_audits: ['التدقيقات الخارجية', 'External audits'],
   };
   const normalized = String(code || '').trim();
   return labels[normalized]?.[isArabic ? 0 : 1]
@@ -304,6 +312,12 @@ const getDetailedTaskRequirementReason = (
       .map(requirement => [requirement.code, requirement] as const),
   ).values()];
   const focusRequirement = requirements.find(requirement => requirement.code === 'automatic_article_focus') || null;
+  const upstreamRequirements = [...new Map(
+    requirements
+      .filter(requirement => ['running', 'scheduled', 'blocked'].includes(requirement.state)
+        && requirement.code !== 'automatic_article_focus')
+      .map(requirement => [requirement.code, requirement] as const),
+  ).values()];
   const missingFields: AutomationTaskRequirement[] = uniqueMissing.length > 0
     ? uniqueMissing
     : task.missingFields.map<AutomationTaskRequirement>(code => ({
@@ -324,6 +338,27 @@ const getDetailedTaskRequirementReason = (
     sentences.push(isArabic
       ? `المتطلبات أو النتائج الناقصة: ${list}.`
       : `Missing requirements or results: ${list}.`);
+  }
+
+  if (upstreamRequirements.length > 0) {
+    const running = upstreamRequirements.filter(requirement => requirement.state === 'running');
+    const scheduled = upstreamRequirements.filter(requirement => requirement.state === 'scheduled');
+    const blocked = upstreamRequirements.filter(requirement => requirement.state === 'blocked');
+    if (running.length > 0) {
+      sentences.push(isArabic
+        ? `المرحلة السابقة الجارية الآن: ${running.map(item => getRequirementLabel(item.code, true)).join('، ')}.`
+        : `Upstream stage running now: ${running.map(item => getRequirementLabel(item.code, false)).join(', ')}.`);
+    }
+    if (scheduled.length > 0) {
+      sentences.push(isArabic
+        ? `المرحلة السابقة بانتظار إعادة محاولة مجدولة: ${scheduled.map(item => getRequirementLabel(item.code, true)).join('، ')}.`
+        : `Upstream stage awaiting a scheduled retry: ${scheduled.map(item => getRequirementLabel(item.code, false)).join(', ')}.`);
+    }
+    if (blocked.length > 0) {
+      sentences.push(isArabic
+        ? `المرحلة السابقة متوقفة وتحتاج مراجعة: ${blocked.map(item => getRequirementLabel(item.code, true)).join('، ')}.`
+        : `Upstream stage is blocked and needs review: ${blocked.map(item => getRequirementLabel(item.code, false)).join(', ')}.`);
+    }
   }
 
   const blockedArticleTitle = focusRequirement?.articleTitle || task.blockedByArticleTitle || null;
