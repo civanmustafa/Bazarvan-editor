@@ -42,8 +42,8 @@ EDITOR_PUBLIC_URL=https://editor.example.com
 إعدادات الموديلات وعناوين المزودين غير السرية اختيارية حسب استخدامك:
 
 ```bash
-GEMINI_MODEL=gemini-2.5-flash
-GEMINI_PAID_MODEL=gemini-2.5-pro
+GEMINI_MODEL=gemini-3.8-flash
+GEMINI_PAID_MODEL=gemini-3.1-pro-preview
 OPENAI_MODEL=gpt-5.4
 FIRECRAWL_API_URL=https://api.firecrawl.dev
 BROWSERLESS_API_URL=https://production-sfo.browserless.io

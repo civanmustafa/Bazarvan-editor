@@ -5,10 +5,13 @@ import {
   GEMINI_FREE_MODEL_VALUES,
   GEMINI_PAID_ANALYSIS_MODEL as REGISTRY_GEMINI_PAID_ANALYSIS_MODEL,
   GEMINI_PAID_MODEL_VALUES,
+  getGeminiRoutingModelValues,
   normalizeGeminiFreeModelId,
+  type GeminiModelRoutingProfile,
 } from "../constants/modelRegistry";
 import {
   claimGeminiApiKeyDetailed,
+  createGeminiApiKeyFingerprint,
   getGeminiKeyFailureCooldownSeconds,
   type GeminiKeyAvailability,
 } from "./geminiKeyCoordinator";
@@ -334,8 +337,8 @@ const selectGeminiModel = (model: unknown, provider: GeminiProvider): string => 
   return GEMINI_PAID_ANALYSIS_MODEL;
 };
 
-const getAllowedGeminiFreeModels = (): string[] => (
-  [...GEMINI_FREE_MODEL_VALUES]
+const normalizeGeminiRoutingProfile = (value: unknown): GeminiModelRoutingProfile => (
+  value === 'throughput' ? 'throughput' : 'quality'
 );
 
 const normalizeRequestedGeminiFreeModels = (value: unknown): string[] => {
@@ -356,11 +359,13 @@ const getGeminiModelOrder = (
   selectedModel: string,
   allowModelFallback: boolean,
   requestedFallbackModels?: unknown,
+  routingProfile?: unknown,
 ): string[] => {
   if (selectedProvider !== "gemini" || !allowModelFallback) return [selectedModel];
+  const profileModels = getGeminiRoutingModelValues(normalizeGeminiRoutingProfile(routingProfile));
   const freeModels = Array.from(new Set([
     ...normalizeRequestedGeminiFreeModels(requestedFallbackModels),
-    ...getAllowedGeminiFreeModels(),
+    ...profileModels,
   ]));
   return Array.from(new Set([
     selectedModel,
@@ -374,11 +379,16 @@ const applyGeminiFreeModelFallbackPolicy = async (requestBody: any): Promise<any
   const settings = await readExternalGeminiSettings();
   const allowModelFallback = requestBody?.allowModelFallback === true
     && settings.allowModelFallback;
+  const routingProfile = normalizeGeminiRoutingProfile(requestBody?.routingProfile);
+  const requestedFallbackModels = normalizeRequestedGeminiFreeModels(requestBody?.fallbackModels);
   return {
     ...(requestBody || {}),
     allowModelFallback,
+    routingProfile,
     fallbackModels: allowModelFallback
-      ? [...GEMINI_FREE_MODEL_VALUES]
+      ? (requestedFallbackModels.length > 0
+          ? requestedFallbackModels
+          : getGeminiRoutingModelValues(routingProfile))
       : undefined,
   };
 };
@@ -794,6 +804,7 @@ const executeGeminiCredentialTierInternal = async (
       progressId: rawProgressId,
       allowModelFallback,
       fallbackModels,
+      routingProfile,
     } = requestBody || {};
     const progressId = normalizeProgressId(rawProgressId);
     throwIfGeminiExecutionCancelled(progressId, options.signal);
@@ -827,6 +838,7 @@ const executeGeminiCredentialTierInternal = async (
       selectedModel,
       allowModelFallback === true,
       fallbackModels,
+      routingProfile,
     );
     const allowedModels = internal.accessPolicy?.allowedModels || [];
     const modelOrder = allowedModels.length > 0
@@ -849,6 +861,15 @@ const executeGeminiCredentialTierInternal = async (
       options.credentialPurpose,
     );
     const GEMINI_API_KEYS = credentials.keys;
+    const projectIdsByFingerprint = Object.fromEntries(
+      credentials.tiers.flatMap(tier => {
+        const projectId = typeof tier.googleProjectId === 'string'
+          ? tier.googleProjectId.trim()
+          : '';
+        if (!projectId) return [];
+        return tier.keys.map(key => [createGeminiApiKeyFingerprint(key), projectId] as const);
+      }),
+    );
 
     if (GEMINI_API_KEYS.length === 0) {
       setGeminiProgress(progressId, {
@@ -977,6 +998,7 @@ const executeGeminiCredentialTierInternal = async (
           provider: selectedProvider,
           model: activeModel,
           keys: GEMINI_API_KEYS,
+          projectIdsByFingerprint,
           excludedFingerprints: attemptedForModel,
           leaseOwner: progressId
             ? `${progressId}:${modelIndex + 1}:${keyIndex + 1}`
@@ -1584,7 +1606,8 @@ const executeGeminiRequestInternal = async (
     provider: 'gemini',
     model: freeSettings.model,
     allowModelFallback: freeSettings.allowModelFallback,
-    fallbackModels: freeSettings.allowModelFallback ? [...GEMINI_FREE_MODEL_VALUES] : undefined,
+    fallbackModels: freeSettings.allowModelFallback ? getGeminiRoutingModelValues('quality') : undefined,
+    routingProfile: 'quality',
   }, options, capabilities, userId);
   return mergeProviderFallbackResult({
     previous: primaryResult,
@@ -1669,6 +1692,7 @@ const getInitialJobProgress = async (requestBody: any, userId?: string) => {
     selectedModel,
     effectiveRequestBody?.allowModelFallback === true,
     effectiveRequestBody?.fallbackModels,
+    effectiveRequestBody?.routingProfile,
   );
 
   return {

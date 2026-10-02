@@ -40,8 +40,8 @@ export const SYSTEM_SETTING_KEYS = ['ai', 'prompts', 'n8n', 'articles', 'roles',
 export type SystemSettingKey = typeof SYSTEM_SETTING_KEYS[number];
 export type SystemSettingsMap = Record<SystemSettingKey, Record<string, any>>;
 
-export const SETTINGS_REGISTRY_VERSION = 6;
-export const USER_PREFERENCES_SCHEMA_VERSION = 2;
+export const SETTINGS_REGISTRY_VERSION = 7;
+export const USER_PREFERENCES_SCHEMA_VERSION = 3;
 
 const ALLOWED_EXTERNAL_COMMAND_IDS = new Set(
   EXTERNAL_READY_COMMAND_DEFINITIONS.map(definition => definition.id),

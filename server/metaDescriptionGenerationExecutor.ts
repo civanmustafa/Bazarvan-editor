@@ -120,6 +120,7 @@ const executeMetaDescriptionGeneration = async (
       }),
       model: aiSettings.model,
       allowModelFallback: aiSettings.allowModelFallback,
+      routingProfile: 'throughput',
       requestIndex,
     });
     attempts.push(...call.attempts);

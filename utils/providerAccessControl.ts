@@ -37,6 +37,7 @@ export type SharedProviderCredentialMetadata = {
   provider: ProviderAccessProvider;
   purpose: ProviderCredentialPurpose;
   label: string;
+  googleProjectId: string | null;
   enabled: boolean;
   keyCount: number;
   keySuffixes: string[];
@@ -141,6 +142,7 @@ export const saveAdminSharedCredential = (options: {
   provider: ProviderAccessProvider;
   purpose?: ProviderCredentialPurpose;
   label: string;
+  googleProjectId?: string;
   apiKeys?: string;
   enabled?: boolean;
   expiresAt?: string | null;

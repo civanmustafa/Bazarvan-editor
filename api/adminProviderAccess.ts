@@ -219,6 +219,7 @@ const handlePut = async (
       provider: body.provider,
       purpose: body.purpose,
       label: body.label,
+      googleProjectId: body.googleProjectId,
       apiKeys: body.apiKeys,
       enabled: body.enabled,
       expiresAt: body.expiresAt,

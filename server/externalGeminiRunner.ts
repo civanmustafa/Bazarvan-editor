@@ -140,6 +140,7 @@ export const runExternalGeminiCall = async (options: {
   allowModelFallback: boolean;
   requestIndex: number;
   useUrlContext?: boolean;
+  routingProfile?: 'quality' | 'throughput';
 }): Promise<ExternalGeminiCallResult> => {
   await assertAutomaticArticlePolicy(options.context.job);
   const progressId = `external-${options.context.job.id}-${options.context.job.attempt_count}-${options.requestIndex}`;
@@ -149,6 +150,7 @@ export const runExternalGeminiCall = async (options: {
     provider: 'gemini',
     model: options.model,
     allowModelFallback: options.allowModelFallback,
+    routingProfile: options.routingProfile || 'quality',
     useUrlContext: options.useUrlContext === true,
     progressId,
   }, {

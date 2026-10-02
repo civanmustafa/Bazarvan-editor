@@ -43,9 +43,9 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-144/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-144/);
-  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=144/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-145/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-145/);
+  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=145/);
   assert.match(deployScript, /verify-project-schema\.sh/);
   assert.match(verifyScript, /get_visible_automation_task_inventory_v13/);
   assert.match(verifyScript, /release_recoverable_automatic_focus_stalls/);
@@ -103,7 +103,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(guide, /20260904000000_preserve_manual_competitor_extraction\.sql/);
   assert.match(verifyScript, /MANUAL_COMPETITOR_EXTRACTION_PRIVILEGES/);
   assert.match(guide, /20260903000000_manual_google_metadata\.sql/);
-  assert.match(verifyScript, /EXPECTED_PUBLIC_TABLES:-68/);
+  assert.match(verifyScript, /EXPECTED_PUBLIC_TABLES:-69/);
   assert.match(verifyScript, /ARTICLE_COMPETITOR_SOURCE_POLICY/);
   assert.match(verifyScript, /AUTOMATION_COORDINATOR_TABLES/);
   assert.match(verifyScript, /AUTOMATION_COORDINATOR_FUNCTION/);
@@ -150,6 +150,9 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(verifyScript, /PROVIDER_CREDENTIAL_VAULT_TABLE/);
   assert.match(verifyScript, /PROVIDER_CREDENTIAL_VAULT_RLS/);
   assert.match(verifyScript, /PROVIDER_CREDENTIAL_VAULT_CLIENT_PRIVILEGES/);
+  assert.match(guide, /20261021000000_gemini_project_quota_routing\.sql/);
+  assert.match(verifyScript, /GEMINI_PROJECT_QUOTA_SCHEMA/);
+  assert.match(verifyScript, /GEMINI_PROJECT_QUOTA_CLIENT_PRIVILEGES/);
   assert.match(verifyScript, /ARTICLE_WRITING_SOURCES_TABLE/);
   assert.match(verifyScript, /ARTICLE_WRITING_SOURCES_RLS/);
   assert.match(verifyScript, /ARTICLE_WRITING_SOURCES_CLIENT_PRIVILEGES/);

@@ -33,6 +33,7 @@ export type ProviderCredentialTier = {
   source: ProviderCredentialSource;
   keys: string[];
   credentialId?: string;
+  googleProjectId?: string | null;
   purpose?: ProviderCredentialPurpose;
 };
 
@@ -67,6 +68,7 @@ export type SharedProviderCredentialMetadata = {
   provider: ProviderAccessProvider;
   purpose: ProviderCredentialPurpose;
   label: string;
+  googleProjectId: string | null;
   enabled: boolean;
   keyCount: number;
   keySuffixes: string[];
@@ -394,6 +396,7 @@ const toCredentialMetadata = (row: SharedCredentialRow): SharedProviderCredentia
   provider: normalizeProvider(row.provider),
   purpose: row.purpose,
   label: row.label,
+  googleProjectId: row.google_project_id || null,
   enabled: row.enabled === true,
   keyCount: Number(row.key_count) || 0,
   keySuffixes: toStringArray(row.key_suffixes),
@@ -707,6 +710,7 @@ export const saveSharedProviderCredential = async (options: {
   provider: ProviderAccessProvider;
   purpose?: ProviderCredentialPurpose;
   label: string;
+  googleProjectId?: unknown;
   apiKeys?: unknown;
   enabled?: boolean;
   expiresAt?: string | null;
@@ -761,6 +765,7 @@ export const saveSharedProviderCredential = async (options: {
     provider,
     purpose,
     label: normalizeLabel(options.label || existing?.label),
+    googleProjectId: options.googleProjectId,
     ...(keys ? { apiKeys: keys } : {}),
     enabled: options.enabled ?? existing?.enabled ?? true,
     expiresAt,
@@ -773,6 +778,7 @@ export const saveSharedProviderCredential = async (options: {
     subjectId: id,
     metadata: {
       label: data.label,
+      googleProjectId: data.google_project_id,
       purpose: data.purpose,
       keyCount: data.key_count,
       keySuffixes: data.key_suffixes,
@@ -926,6 +932,7 @@ export const resolveAssignedProviderKeys = async (
         source: grant.scope === 'user' ? 'assigned_user' : 'assigned_all',
         keys: decryptKeys(credential),
         credentialId: credential.id,
+        googleProjectId: credential.google_project_id || null,
         purpose: credential.purpose,
       };
       result[grant.scope === 'user' ? 'user' : 'all'].push(tier);

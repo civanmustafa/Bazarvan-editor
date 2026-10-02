@@ -175,3 +175,28 @@ test('Gemini remembers model/key 404 incompatibility while keeping 429 temporary
   assert.match(coordinator, /\.from\('ai_gemini_key_model_state'\)[\s\S]*\.eq\('last_status', 404\)/);
   assert.match(coordinator, /localModelIncompatibilities/);
 });
+
+test('Gemini routes quality and throughput work separately and coordinates known Google projects', async () => {
+  const [registry, engine, coordinator, migration, adminSettings] = await Promise.all([
+    readWorkspaceFile('constants/modelRegistry.ts'),
+    readWorkspaceFile('server/aiExecutionEngine.ts'),
+    readWorkspaceFile('server/geminiKeyCoordinator.ts'),
+    readWorkspaceFile('supabase/migrations/20261021000000_gemini_project_quota_routing.sql'),
+    readWorkspaceFile('components/AdminProviderAccessSettings.tsx'),
+  ]);
+
+  assert.match(registry, /GEMINI_QUALITY_MODEL_VALUES/);
+  assert.match(registry, /GEMINI_THROUGHPUT_MODEL_VALUES/);
+  assert.match(registry, /gemini-3\.8-flash/);
+  assert.match(registry, /gemini-3\.5-flash-lite/);
+  assert.doesNotMatch(registry, /gemini-3-flash-preview/);
+  assert.match(engine, /normalizeGeminiRoutingProfile/);
+  assert.match(engine, /getGeminiRoutingModelValues/);
+  assert.match(coordinator, /localProjectModelCooldowns/);
+  assert.match(coordinator, /projectIdsByFingerprint/);
+  assert.match(migration, /ai_gemini_project_model_state/);
+  assert.match(migration, /google_project_id/);
+  assert.match(migration, /project_state\.cooldown_until/);
+  assert.match(adminSettings, /معرّف مشروع Google/);
+  assertBalancedSqlParentheses(migration);
+});

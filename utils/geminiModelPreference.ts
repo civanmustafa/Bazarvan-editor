@@ -55,8 +55,8 @@ const persistAiPreferences = () => {
 export const buildGeminiFreeModelOptions = (
   _extraModels: string[] = [],
 ): { value: string; label: string }[] => (
-  // Keep the editor and settings selectors limited to the four reviewed free
-  // models even if an older server still advertises legacy environment models.
+  // Keep the editor and settings selectors limited to the reviewed registry,
+  // even if an older server still advertises retired preview model names.
   uniqueModelIds(GEMINI_FREE_MODEL_VALUES)
     .map(model => ({
       value: model,

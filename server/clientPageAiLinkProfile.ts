@@ -275,6 +275,7 @@ const executeEnrichment = async (input: {
       provider: input.provider,
       model: input.model,
       allowModelFallback: input.provider === 'gemini',
+      routingProfile: 'throughput',
       progressId: `link-${input.pageId.replace(/-/g, '').slice(0, 24)}-${Date.now().toString(36)}`,
     }, {
       signal: input.signal,

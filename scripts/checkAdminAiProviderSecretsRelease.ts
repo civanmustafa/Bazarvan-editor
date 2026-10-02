@@ -5,7 +5,10 @@ import {
   CONTENT_WRITING_RESUME_SECRET_MIGRATION,
 } from '../constants/adminAiProviderSecrets.ts';
 import { USER_AI_PROVIDER_SECRETS_MIGRATION } from '../constants/userAiProviderSecrets.ts';
-import { PROVIDER_CREDENTIAL_VAULT_MIGRATION } from '../server/providerCredentialVault.ts';
+import {
+  GEMINI_PROJECT_QUOTA_ROUTING_MIGRATION,
+  PROVIDER_CREDENTIAL_VAULT_MIGRATION,
+} from '../server/providerCredentialVault.ts';
 import { PROVIDER_EXPLICIT_GRANTS_MIGRATION } from '../constants/providerAccessControl.ts';
 
 const root = process.cwd();
@@ -15,6 +18,7 @@ for (const migration of [
   CONTENT_WRITING_RESUME_SECRET_MIGRATION,
   PROVIDER_CREDENTIAL_VAULT_MIGRATION,
   PROVIDER_EXPLICIT_GRANTS_MIGRATION,
+  GEMINI_PROJECT_QUOTA_ROUTING_MIGRATION,
 ]) {
   const migrationPath = path.join(root, 'supabase', 'migrations', migration);
   const migrationInfo = await stat(migrationPath);
@@ -30,6 +34,7 @@ for (const marker of [
   CONTENT_WRITING_RESUME_SECRET_MIGRATION,
   PROVIDER_CREDENTIAL_VAULT_MIGRATION,
   PROVIDER_EXPLICIT_GRANTS_MIGRATION,
+  GEMINI_PROJECT_QUOTA_ROUTING_MIGRATION,
   'AI_SETTINGS_ENCRYPTION_KEY',
   'provider_credentials_vault',
   'لا يوجد أي fallback لمفاتيح المزوّدين من بيئة Hostinger',
@@ -122,6 +127,7 @@ console.log(JSON.stringify({
     CONTENT_WRITING_RESUME_SECRET_MIGRATION,
     PROVIDER_CREDENTIAL_VAULT_MIGRATION,
     PROVIDER_EXPLICIT_GRANTS_MIGRATION,
+    GEMINI_PROJECT_QUOTA_ROUTING_MIGRATION,
   ],
   readinessEndpoint: '/readyz',
 }, null, 2));

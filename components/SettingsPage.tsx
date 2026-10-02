@@ -507,7 +507,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ section }) => {
           />
           <ToggleField
             label="التبديل بين موديلات Gemini المجانية"
-            description="عند تفعيله يجرب الخادم موديلات Gemini المجانية بالترتيب إذا فشل الموديل الأول، سواء كان Gemini مختارًا مباشرة أو تم الوصول إليه بالرجوع التلقائي."
+            description="عند تفعيله يستخدم الخادم مسار الجودة (3.8 ← 3.7 ← 3.6) للكتابة والتحليل، ومسار الإنتاج الكثيف (3.5 Flash-Lite ← 3.5 Flash ← 3.6) للحقول والمهام القصيرة، بدل استنزاف جميع الموديلات في كل مهمة."
             checked={Boolean(settings.ai.geminiFreeModelFallbackEnabled)}
             onChange={value => updateSetting('ai', 'geminiFreeModelFallbackEnabled', value)}
           />

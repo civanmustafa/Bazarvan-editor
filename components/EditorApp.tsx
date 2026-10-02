@@ -22,11 +22,11 @@ import InternalLinkAutomation from './InternalLinkAutomation';
 import ConcurrentEditConflictBanner from './ConcurrentEditConflictBanner';
 import ArticleEditorPresenceBanner from './ArticleEditorPresenceBanner';
 import GoogleMetadataSuggestions from './GoogleMetadataSuggestions';
-import LeftSidebar from './LeftSidebar';
 import ModalManager from './ModalManager';
 import SelectionToolbar from './SelectionToolbar';
 import '../styles/editor.css';
 
+const LeftSidebar = React.lazy(() => import('./LeftSidebar'));
 const RightSidebar = React.lazy(() => import('./RightSidebar'));
 const AiExecutionMonitor = React.lazy(() => import('./AiKeyUsageToast'));
 const SpotlightSearch = React.lazy(() => import('./SpotlightSearch'));
@@ -163,12 +163,22 @@ const EditorView: React.FC = () => {
   return (
     <div className={`h-screen overflow-hidden ${isDarkMode ? 'dark' : ''}`}>
       <main className="relative flex h-full gap-[0.125rem] bg-[#FAFAFA] p-[0.125rem] dark:bg-[#181818]">
-        <LeftSidebar
-          collapsed={workspacePreferences.keywordsPanelCollapsed}
-          expandedFlexBasis={leftSidebarFlexBasis}
-          isHidden={isFocusMode}
-          onToggleCollapsed={toggleKeywordsPanel}
-        />
+        <React.Suspense
+          fallback={isFocusMode ? null : (
+            <aside
+              className={`h-full min-w-0 flex-none rounded-lg bg-[#F2F3F5] shadow-lg dark:bg-[#1F1F1F] ${workspacePreferences.keywordsPanelCollapsed ? 'w-12 basis-12' : 'w-auto basis-[20.57%]'}`}
+              style={workspacePreferences.keywordsPanelCollapsed ? undefined : { flexBasis: leftSidebarFlexBasis }}
+              aria-hidden="true"
+            />
+          )}
+        >
+          <LeftSidebar
+            collapsed={workspacePreferences.keywordsPanelCollapsed}
+            expandedFlexBasis={leftSidebarFlexBasis}
+            isHidden={isFocusMode}
+            onToggleCollapsed={toggleKeywordsPanel}
+          />
+        </React.Suspense>
         <div className="relative flex h-full min-w-0 flex-1 basis-[60.73%] flex-col transition-[flex-basis] duration-150">
           <React.Suspense fallback={null}>
             <TipsCarousel />

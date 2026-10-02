@@ -4,6 +4,7 @@ import {
   PROVIDER_EXPLICIT_GRANTS_MIGRATION,
 } from '../constants/providerAccessControl.ts';
 import {
+  GEMINI_PROJECT_QUOTA_ROUTING_MIGRATION,
   PROVIDER_CREDENTIAL_VAULT_MIGRATION,
   PROVIDER_CREDENTIAL_VAULT_TABLE,
 } from './providerCredentialVault.ts';
@@ -62,7 +63,7 @@ export const checkAdminAiProviderSecretsReadiness = async (options: {
       || getExternalAnalysisSupabaseAdmin() as unknown as AdminAiProviderSecretsReadinessClient;
     const { error } = await client
       .from(PROVIDER_CREDENTIAL_VAULT_TABLE)
-      .select('id,vault_key,credential_type,provider,owner_user_id,enabled,key_count,key_suffixes,encryption_version')
+      .select('id,vault_key,credential_type,provider,owner_user_id,enabled,key_count,key_suffixes,encryption_version,google_project_id')
       .limit(1);
     if (error) {
       failures.push(`vaultSchema: ${error.code || 'unknown'}: ${error.message || 'Unknown Supabase error.'}`);
@@ -84,6 +85,7 @@ export const checkAdminAiProviderSecretsReadiness = async (options: {
     requiredMigrations: [
       PROVIDER_CREDENTIAL_VAULT_MIGRATION,
       PROVIDER_EXPLICIT_GRANTS_MIGRATION,
+      GEMINI_PROJECT_QUOTA_ROUTING_MIGRATION,
     ],
     checks,
     ...(!ok ? {

@@ -45,6 +45,7 @@ export type GeminiEngineRequest = {
     useUrlContext?: boolean;
     allowModelFallback?: boolean;
     fallbackModels?: string[];
+    routingProfile?: 'quality' | 'throughput';
     telemetry?: {
         source?: string;
         articleId?: string;

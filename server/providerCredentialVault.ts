@@ -14,6 +14,8 @@ import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue.ts';
 export const PROVIDER_CREDENTIAL_VAULT_TABLE = 'provider_credentials_vault';
 export const PROVIDER_CREDENTIAL_VAULT_MIGRATION =
   '20260829030000_provider_credential_vault.sql';
+export const GEMINI_PROJECT_QUOTA_ROUTING_MIGRATION =
+  '20261021000000_gemini_project_quota_routing.sql';
 
 export type ProviderCredentialVaultType = 'personal' | 'shared';
 export type ProviderCredentialVaultPurpose = ProviderCredentialPurpose;
@@ -32,6 +34,7 @@ export type ProviderCredentialVaultRow = {
   purpose: ProviderCredentialVaultPurpose;
   owner_user_id: string | null;
   label: string;
+  google_project_id: string | null;
   ciphertext: string;
   initialization_vector: string;
   authentication_tag: string;
@@ -59,6 +62,7 @@ export type ProviderCredentialVaultMetadata = {
   purpose: ProviderCredentialVaultPurpose;
   ownerUserId: string | null;
   label: string;
+  googleProjectId: string | null;
   enabled: boolean;
   keyCount: number;
   keySuffixes: string[];
@@ -74,6 +78,7 @@ const ENCRYPTION_VERSION = 1;
 const ENCRYPTION_KEY_BYTES = 32;
 const INITIALIZATION_VECTOR_BYTES = 12;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const GOOGLE_PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,118}[a-z0-9]$/i;
 const PROVIDERS = new Set<ProviderAccessProvider>([
   'gemini_free',
   'gemini_paid',
@@ -352,6 +357,7 @@ const VAULT_SELECT = [
   'purpose',
   'owner_user_id',
   'label',
+  'google_project_id',
   'ciphertext',
   'initialization_vector',
   'authentication_tag',
@@ -427,6 +433,7 @@ export const saveProviderCredentialVaultRow = async (options: {
   purpose?: ProviderCredentialVaultPurpose;
   ownerUserId?: string | null;
   label: string;
+  googleProjectId?: unknown;
   apiKeys?: unknown;
   enabled?: boolean;
   expiresAt?: string | null;
@@ -449,6 +456,16 @@ export const saveProviderCredentialVaultRow = async (options: {
   const label = String(options.label || existing?.label || '').trim();
   if (!label || label.length > 160) {
     throw new ProviderCredentialVaultError('Credential label is invalid.', 400, 'VAULT_LABEL_INVALID');
+  }
+  const requestedGoogleProjectId = options.googleProjectId === undefined
+    ? existing?.google_project_id || null
+    : String(options.googleProjectId || '').trim() || null;
+  if (requestedGoogleProjectId && !GOOGLE_PROJECT_ID_PATTERN.test(requestedGoogleProjectId)) {
+    throw new ProviderCredentialVaultError(
+      'Google project ID must be 2-120 letters, numbers, dots, colons, underscores, or hyphens.',
+      400,
+      'VAULT_GOOGLE_PROJECT_ID_INVALID',
+    );
   }
   const hasNewKeys = options.apiKeys !== undefined
     && (Array.isArray(options.apiKeys) || String(options.apiKeys || '').trim() !== '');
@@ -482,6 +499,9 @@ export const saveProviderCredentialVaultRow = async (options: {
     purpose,
     owner_user_id: ownerUserId,
     label,
+    google_project_id: provider === 'gemini_free' || provider === 'gemini_paid'
+      ? requestedGoogleProjectId
+      : null,
     ciphertext: encrypted.ciphertext,
     initialization_vector: encrypted.initialization_vector,
     authentication_tag: encrypted.authentication_tag,
@@ -530,6 +550,7 @@ export const toProviderCredentialVaultMetadata = (
   purpose: row.purpose,
   ownerUserId: row.owner_user_id || null,
   label: row.label,
+  googleProjectId: row.google_project_id || null,
   enabled: row.enabled === true,
   keyCount: Math.max(0, Number(row.key_count) || 0),
   keySuffixes: normalizeSuffixes(row.key_suffixes),

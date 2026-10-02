@@ -145,6 +145,7 @@ export const sanitizeAiJobRequestPayload = (value: unknown): AiJobJson => {
     useUrlContext: source.useUrlContext === true,
     allowModelFallback: source.allowModelFallback === true,
     fallbackModels,
+    routingProfile: source.routingProfile === 'throughput' ? 'throughput' : 'quality',
     progressId: typeof source.progressId === 'string' ? source.progressId.trim() : '',
   };
 };

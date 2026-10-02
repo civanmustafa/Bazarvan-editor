@@ -6,8 +6,8 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-144}"
-readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-68}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-145}"
+readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-69}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
 
@@ -66,6 +66,12 @@ readonly DASHBOARD_ACTIVITY_SUMMARY_FUNCTION="$(sql_scalar "select to_regprocedu
 readonly PROVIDER_CREDENTIAL_VAULT_TABLE="$(sql_scalar "select to_regclass('public.provider_credentials_vault') is not null")"
 readonly PROVIDER_CREDENTIAL_VAULT_RLS="$(sql_scalar "select coalesce((select relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'provider_credentials_vault'), false)")"
 readonly PROVIDER_CREDENTIAL_VAULT_CLIENT_PRIVILEGES="$(sql_scalar "select has_table_privilege('anon', 'public.provider_credentials_vault', 'select') or has_table_privilege('authenticated', 'public.provider_credentials_vault', 'select')")"
+readonly GEMINI_PROJECT_QUOTA_SCHEMA="$(sql_scalar "select
+  exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = 'provider_credentials_vault' and column_name = 'google_project_id')
+  and exists(select 1 from information_schema.columns where table_schema = 'public' and table_name = 'ai_gemini_key_pool' and column_name = 'project_id')
+  and to_regclass('public.ai_gemini_project_model_state') is not null
+  and position('project_state' in pg_get_functiondef('public.claim_gemini_api_key(text,text,text[],text[],text,integer)'::regprocedure)) > 0")"
+readonly GEMINI_PROJECT_QUOTA_CLIENT_PRIVILEGES="$(sql_scalar "select has_table_privilege('anon', 'public.ai_gemini_project_model_state', 'select')")"
 readonly ARTICLE_WRITING_SOURCES_TABLE="$(sql_scalar "select to_regclass('public.article_writing_sources') is not null")"
 readonly ARTICLE_WRITING_SOURCES_RLS="$(sql_scalar "select coalesce((select relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'article_writing_sources'), false)")"
 readonly ARTICLE_WRITING_SOURCES_CLIENT_PRIVILEGES="$(sql_scalar "select has_table_privilege('anon', 'public.article_writing_sources', 'select') or has_table_privilege('authenticated', 'public.article_writing_sources', 'select')")"
@@ -179,6 +185,8 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${PROVIDER_CREDENTIAL_VAULT_TABLE}" == "t" ]] || fail "Canonical provider credential vault table is missing."
 [[ "${PROVIDER_CREDENTIAL_VAULT_RLS}" == "t" ]] || fail "Canonical provider credential vault RLS is not enabled."
 [[ "${PROVIDER_CREDENTIAL_VAULT_CLIENT_PRIVILEGES}" == "f" ]] || fail "Browser roles can read the provider credential vault."
+[[ "${GEMINI_PROJECT_QUOTA_SCHEMA}" == "t" ]] || fail "Gemini project/model quota coordination schema is missing."
+[[ "${GEMINI_PROJECT_QUOTA_CLIENT_PRIVILEGES}" == "f" ]] || fail "Anonymous users can read Gemini project quota state."
 [[ "${ARTICLE_WRITING_SOURCES_TABLE}" == "t" ]] || fail "Article writing sources table is missing."
 [[ "${ARTICLE_WRITING_SOURCES_RLS}" == "t" ]] || fail "Article writing sources RLS is not enabled."
 [[ "${ARTICLE_WRITING_SOURCES_CLIENT_PRIVILEGES}" == "f" ]] || fail "Browser roles can read article writing sources directly."

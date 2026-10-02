@@ -102,6 +102,7 @@ const callGemini = async (
     provider,
     model,
     allowModelFallback: provider === 'gemini',
+    routingProfile: 'throughput',
   }, { telemetry });
   const body = isRecord(result.body) ? result.body : {};
   const text = toTrimmedString(body.text);

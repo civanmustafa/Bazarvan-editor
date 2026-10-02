@@ -119,6 +119,7 @@ test('administrator AI secret readiness checks schema and encryption independent
     assert.deepEqual(ready.requiredMigrations, [
       '20260829030000_provider_credential_vault.sql',
       '20260829040000_provider_credentials_explicit_grants.sql',
+      '20261021000000_gemini_project_quota_routing.sql',
     ]);
   });
 

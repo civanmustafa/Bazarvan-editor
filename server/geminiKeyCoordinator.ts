@@ -11,6 +11,7 @@ export type GeminiApiKeyLease = {
   apiKey: string;
   fingerprint: string;
   suffix: string;
+  projectId: string | null;
   source: 'supabase' | 'memory';
   complete: (options: {
     outcome: GeminiKeyOutcome;
@@ -42,6 +43,7 @@ type KeyMetadata = {
   fingerprint: string;
   suffix: string;
   position: number;
+  projectId: string | null;
 };
 
 type LocalKeyState = {
@@ -54,6 +56,7 @@ type LocalKeyState = {
 
 const localKeyStates = new Map<string, LocalKeyState>();
 const localModelCooldowns = new Map<string, number>();
+const localProjectModelCooldowns = new Map<string, number>();
 const localModelIncompatibilities = new Set<string>();
 const persistedIncompatibilityCache = new Map<string, {
   fingerprints: Set<string>;
@@ -119,13 +122,17 @@ const getSupabaseAdmin = (): SupabaseAdmin | null => {
   return supabaseAdmin;
 };
 
-const toMetadata = (keys: string[]): KeyMetadata[] => Array.from(new Set(
+const toMetadata = (
+  keys: string[],
+  projectIdsByFingerprint: Readonly<Record<string, string>> = {},
+): KeyMetadata[] => Array.from(new Set(
   keys.map(key => key.trim()).filter(Boolean),
 )).map((apiKey, position) => ({
   apiKey,
   fingerprint: createGeminiApiKeyFingerprint(apiKey),
   suffix: getGeminiApiKeySuffix(apiKey),
   position,
+  projectId: projectIdsByFingerprint[createGeminiApiKeyFingerprint(apiKey)]?.trim() || null,
 }));
 
 const syncProviderKeys = async (
@@ -133,7 +140,7 @@ const syncProviderKeys = async (
   provider: GeminiKeyProvider,
   keys: KeyMetadata[],
 ): Promise<void> => {
-  const signature = keys.map(key => key.fingerprint).join('|');
+  const signature = keys.map(key => `${key.fingerprint}:${key.projectId || '-'}`).join('|');
   if (syncedProviderSignatures.get(provider) === signature) return;
   const { error } = await supabase.rpc('sync_gemini_api_key_pool', {
     p_provider: provider,
@@ -141,6 +148,7 @@ const syncProviderKeys = async (
       fingerprint: key.fingerprint,
       suffix: key.suffix,
       position: key.position,
+      project_id: key.projectId,
     })),
   });
   if (error) throw error;
@@ -156,6 +164,12 @@ const localModelKey = (
   model: string,
   fingerprint: string,
 ): string => `${provider}:${model}:${fingerprint}`;
+
+const localProjectModelKey = (
+  provider: GeminiKeyProvider,
+  model: string,
+  projectId: string,
+): string => `${provider}:${model}:${projectId}`;
 
 const compatibilityCacheKey = (
   provider: GeminiKeyProvider,
@@ -248,11 +262,16 @@ const inspectLocalAvailability = (options: {
     const cooldownUntil = localModelCooldowns.get(
       localModelKey(options.provider, options.model, key.fingerprint),
     ) || 0;
+    const projectCooldownUntil = key.projectId
+      ? localProjectModelCooldowns.get(
+          localProjectModelKey(options.provider, options.model, key.projectId),
+        ) || 0
+      : 0;
     if (leaseExpiresAt > now) availability.leasedCount += 1;
-    else if (cooldownUntil > now) availability.cooldownCount += 1;
+    else if (Math.max(cooldownUntil, projectCooldownUntil) > now) availability.cooldownCount += 1;
     else availability.eligibleCount += 1;
 
-    const temporaryUntil = Math.max(leaseExpiresAt, cooldownUntil);
+    const temporaryUntil = Math.max(leaseExpiresAt, cooldownUntil, projectCooldownUntil);
     if (temporaryUntil > now) nextEligibleAt = Math.min(nextEligibleAt, temporaryUntil);
   });
 
@@ -305,9 +324,15 @@ const claimLocalKey = (options: {
       const cooldownUntil = localModelCooldowns.get(
         localModelKey(options.provider, options.model, key.fingerprint),
       ) || 0;
+      const projectCooldownUntil = key.projectId
+        ? localProjectModelCooldowns.get(
+            localProjectModelKey(options.provider, options.model, key.projectId),
+          ) || 0
+        : 0;
       return !state?.disabled
         && (!state?.leaseExpiresAt || state.leaseExpiresAt <= now)
-        && cooldownUntil <= now;
+        && cooldownUntil <= now
+        && projectCooldownUntil <= now;
     })
     .sort((left, right) => {
       const leftState = localKeyStates.get(localStateKey(options.provider, left.fingerprint));
@@ -334,6 +359,7 @@ const claimLocalKey = (options: {
     apiKey: selected.apiKey,
     fingerprint: selected.fingerprint,
     suffix: selected.suffix,
+    projectId: selected.projectId,
     source: 'memory',
     complete: async result => {
       if (completed) return;
@@ -350,6 +376,12 @@ const claimLocalKey = (options: {
           localModelKey(options.provider, options.model, selected.fingerprint),
           Date.now() + (result.cooldownSeconds || 0) * 1_000,
         );
+        if (selected.projectId && (result.reason === 'quota' || result.status === 429)) {
+          localProjectModelCooldowns.set(
+            localProjectModelKey(options.provider, options.model, selected.projectId),
+            Date.now() + (result.cooldownSeconds || 0) * 1_000,
+          );
+        }
       }
       if (isGeminiModelKeyPermanentlyIncompatibleFailure(result.reason, result.status)) {
         rememberModelKeyIncompatibility(options.provider, options.model, selected.fingerprint);
@@ -358,6 +390,11 @@ const claimLocalKey = (options: {
         localModelCooldowns.delete(
           localModelKey(options.provider, options.model, selected.fingerprint),
         );
+        if (selected.projectId) {
+          localProjectModelCooldowns.delete(
+            localProjectModelKey(options.provider, options.model, selected.projectId),
+          );
+        }
       }
     },
   };
@@ -367,11 +404,12 @@ export const claimGeminiApiKeyDetailed = async (options: {
   provider: GeminiKeyProvider;
   model: string;
   keys: string[];
+  projectIdsByFingerprint?: Readonly<Record<string, string>>;
   excludedFingerprints?: Iterable<string>;
   leaseOwner?: string;
   leaseSeconds?: number;
 }): Promise<GeminiApiKeyClaimResult> => {
-  const keys = toMetadata(options.keys);
+  const keys = toMetadata(options.keys, options.projectIdsByFingerprint);
   if (keys.length === 0) {
     return { lease: null, availability: emptyAvailability('memory', 0) };
   }
@@ -449,10 +487,23 @@ export const claimGeminiApiKeyDetailed = async (options: {
           apiKey: selected.apiKey,
           fingerprint: selected.fingerprint,
           suffix: selected.suffix,
+          projectId: selected.projectId,
           source: 'supabase',
           complete: async result => {
             if (completed) return;
             completed = true;
+            if (selected.projectId && result.outcome === 'failed'
+                && (result.reason === 'quota' || result.status === 429)
+                && (result.cooldownSeconds || 0) > 0) {
+              localProjectModelCooldowns.set(
+                localProjectModelKey(options.provider, options.model, selected.projectId),
+                Date.now() + (result.cooldownSeconds || 0) * 1_000,
+              );
+            } else if (selected.projectId && result.outcome === 'success') {
+              localProjectModelCooldowns.delete(
+                localProjectModelKey(options.provider, options.model, selected.projectId),
+              );
+            }
             if (isGeminiModelKeyPermanentlyIncompatibleFailure(result.reason, result.status)) {
               rememberModelKeyIncompatibility(options.provider, options.model, selected.fingerprint);
             }
@@ -505,6 +556,7 @@ export const claimGeminiApiKey = async (options: {
   provider: GeminiKeyProvider;
   model: string;
   keys: string[];
+  projectIdsByFingerprint?: Readonly<Record<string, string>>;
   excludedFingerprints?: Iterable<string>;
   leaseOwner?: string;
   leaseSeconds?: number;

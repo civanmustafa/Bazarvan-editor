@@ -130,8 +130,8 @@ VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your-supabase-publishable-or-anon-key
 SUPABASE_SERVICE_ROLE_KEY=ضع_مفتاح_خدمة_Supabase_هنا
 AI_SETTINGS_ENCRYPTION_KEY=ضع_32_بايت_Base64_هنا
-GEMINI_MODEL=gemini-2.5-flash
-GEMINI_PAID_MODEL=gemini-2.5-pro
+GEMINI_MODEL=gemini-3.8-flash
+GEMINI_PAID_MODEL=gemini-3.1-pro-preview
 OPENAI_MODEL=gpt-5.4
 ```
 

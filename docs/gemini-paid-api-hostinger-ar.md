@@ -14,8 +14,8 @@ supabase/migrations/20260829030000_provider_credential_vault.sql
 
 ```bash
 AI_SETTINGS_ENCRYPTION_KEY=ضع_هنا_32_بايت_Base64
-GEMINI_MODEL=gemini-2.5-flash
-GEMINI_PAID_MODEL=gemini-2.5-pro
+GEMINI_MODEL=gemini-3.8-flash
+GEMINI_PAID_MODEL=gemini-3.1-pro-preview
 GEMINI_ALLOWED_MODELS=
 ```
 

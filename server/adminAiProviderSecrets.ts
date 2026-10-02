@@ -37,6 +37,7 @@ export type AiCredentialPurpose = 'standard' | 'content_writing_resume';
 export type ResolvedAiCredentialTier = {
   source: AiCredentialSource;
   keys: string[];
+  googleProjectId?: string | null;
 };
 
 export type AdminAiProviderSecretStatus = {
@@ -245,6 +246,7 @@ const resolveCredentialSet = async (
   const tiers = plan.tiers.map(tier => ({
     source: tier.source as AiCredentialSource,
     keys: tier.keys,
+    googleProjectId: tier.googleProjectId || null,
   }));
   return {
     keys: tiers.flatMap(tier => tier.keys),

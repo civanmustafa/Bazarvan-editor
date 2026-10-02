@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  GEMINI_FREE_MODEL_VALUES,
+  getGeminiRoutingModelValues,
   OPENAI_ANALYSIS_MODEL,
 } from '../constants/modelRegistry';
 import type { AiProviderCapabilities } from '../constants/aiProviderCapabilities';
@@ -307,8 +307,9 @@ const executeOpenAiProviderFallback = async (options: {
       : options.capabilities.providers.geminiPaid.model,
     allowModelFallback: fallbackProvider === 'gemini' && freeSettings?.allowModelFallback === true,
     fallbackModels: fallbackProvider === 'gemini' && freeSettings?.allowModelFallback === true
-      ? [...GEMINI_FREE_MODEL_VALUES]
+      ? getGeminiRoutingModelValues('quality')
       : undefined,
+    routingProfile: 'quality',
     progressId: `gemini-${randomUUID()}`,
   }, {
     signal: options.signal,

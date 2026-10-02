@@ -838,6 +838,7 @@ export const executeContentWritingTurn = async (options: {
       provider,
       model,
       allowModelFallback: provider === 'gemini' && allowModelFallback,
+      routingProfile: 'quality',
       progressId: requestId,
     }, {
       signal: options.signal,

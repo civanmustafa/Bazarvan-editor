@@ -5,9 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import {
   GEMINI_ANALYSIS_MODEL,
+  GEMINI_AUTOMATIC_FALLBACK_MODEL_VALUES,
   GEMINI_FREE_MODEL_VALUES,
   GEMINI_PAID_ANALYSIS_MODEL,
   GEMINI_PAID_MODEL_VALUES,
+  GEMINI_QUALITY_MODEL_VALUES,
+  GEMINI_THROUGHPUT_MODEL_VALUES,
   MODEL_REGISTRY,
   normalizeGeminiFreeModelId,
   normalizeGeminiPaidModelId,
@@ -107,12 +110,14 @@ const importSemanticKeywordPolicy = async (): Promise<any> => {
 
 test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
   assert.deepEqual(GEMINI_FREE_MODEL_VALUES, [
+    'gemini-3.8-flash',
+    'gemini-3.7-flash',
     'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
     'gemini-3.5-flash',
     'gemini-2.5-pro',
-    'gemini-3-flash-preview',
   ]);
-  assert.equal(GEMINI_FREE_MODEL_VALUES.length, 4);
+  assert.equal(GEMINI_FREE_MODEL_VALUES.length, 6);
   assert.equal(GEMINI_ANALYSIS_MODEL, MODEL_REGISTRY.gemini.free[0].id);
   assert.deepEqual(
     GEMINI_FREE_MODEL_VALUES,
@@ -131,6 +136,18 @@ test('ModelRegistry owns a unique strongest-to-lightest Gemini order', () => {
     false,
   );
   assert.equal(normalizeGeminiPaidModelId('not-a-model'), GEMINI_PAID_ANALYSIS_MODEL);
+  assert.deepEqual([...GEMINI_QUALITY_MODEL_VALUES], [
+    'gemini-3.8-flash',
+    'gemini-3.7-flash',
+    'gemini-3.6-flash',
+  ]);
+  assert.deepEqual([...GEMINI_THROUGHPUT_MODEL_VALUES], [
+    'gemini-3.5-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash',
+  ]);
+  assert.equal(GEMINI_AUTOMATIC_FALLBACK_MODEL_VALUES.includes('gemini-2.5-pro'), false);
+  assert.equal((GEMINI_FREE_MODEL_VALUES as readonly string[]).includes('gemini-3-flash-preview'), false);
 });
 
 test('Gemini free model upgrade starts existing users on the new strongest model once', async () => {
@@ -141,7 +158,7 @@ test('Gemini free model upgrade starts existing users on the new strongest model
       defaultGeminiModel: 'gemini-3.5-flash',
     },
   });
-  assert.equal(upgradedSystem.ai.defaultGeminiModel, 'gemini-3.6-flash');
+  assert.equal(upgradedSystem.ai.defaultGeminiModel, 'gemini-3.8-flash');
 
   const currentSystem = registry.normalizeSystemSettingsMap({
     ai: {
@@ -155,7 +172,7 @@ test('Gemini free model upgrade starts existing users on the new strongest model
     schemaVersion: registry.USER_PREFERENCES_SCHEMA_VERSION - 1,
     ai: { defaultGeminiModel: 'gemini-3.5-flash' },
   });
-  assert.equal(upgradedUser.ai.defaultGeminiModel, 'gemini-3.6-flash');
+  assert.equal(upgradedUser.ai.defaultGeminiModel, 'gemini-3.8-flash');
 
   const currentUser = registry.normalizeUserPreferences({
     schemaVersion: registry.USER_PREFERENCES_SCHEMA_VERSION,

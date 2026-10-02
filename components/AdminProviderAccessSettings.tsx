@@ -115,6 +115,7 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
   const [credentialProvider, setCredentialProvider] = useState<ProviderAccessProvider>('gemini_free');
   const [credentialPurpose, setCredentialPurpose] = useState<ProviderCredentialPurpose>('default');
   const [credentialLabel, setCredentialLabel] = useState('');
+  const [credentialGoogleProjectId, setCredentialGoogleProjectId] = useState('');
   const [credentialKeys, setCredentialKeys] = useState('');
   const [credentialScope, setCredentialScope] = useState<'unassigned' | 'all' | 'user'>(
     isUserScope ? 'user' : 'unassigned',
@@ -214,6 +215,9 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
       provider: credentialProvider,
       purpose: credentialPurpose,
       label: credentialLabel.trim(),
+      googleProjectId: credentialProvider === 'gemini_free' || credentialProvider === 'gemini_paid'
+        ? credentialGoogleProjectId.trim()
+        : undefined,
       apiKeys: credentialKeys,
       ...(credentialScope === 'unassigned' ? {} : { scope: credentialScope }),
       expiresAt: credentialExpiry ? new Date(`${credentialExpiry}T23:59:59`).toISOString() : null,
@@ -221,6 +225,7 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
       ? 'تم تشفير مجموعة المفاتيح وحفظها دون تعيين. لن تستخدم حتى يعيّنها المسؤول.'
       : 'تم تشفير مجموعة المفاتيح وحفظها وتعيينها بنجاح.').then(() => {
       setCredentialLabel('');
+      setCredentialGoogleProjectId('');
       setCredentialKeys('');
       setCredentialExpiry('');
       setShowCredentialKeys(false);
@@ -386,6 +391,21 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
             {PROVIDER_ACCESS_PROVIDERS.map(provider => <option key={provider} value={provider}>{PROVIDER_ACCESS_LABELS[provider]}</option>)}
           </AppSelect>
           <input value={credentialLabel} onChange={event => setCredentialLabel(event.target.value)} placeholder="اسم داخلي، مثل: فريق المحتوى" className={inputClass} />
+          {(credentialProvider === 'gemini_free' || credentialProvider === 'gemini_paid') && (
+            <label className="text-xs font-bold text-gray-600 dark:text-gray-300">
+              <span className="mb-1 block">معرّف مشروع Google (موصى به)</span>
+              <input
+                value={credentialGoogleProjectId}
+                onChange={event => setCredentialGoogleProjectId(event.target.value)}
+                placeholder="مثال: my-gemini-project"
+                dir="ltr"
+                className={inputClass}
+              />
+              <span className="mt-1 block text-[11px] font-semibold leading-5 text-gray-500 dark:text-gray-400">
+                ضع في المجموعة مفاتيح مشروع Google واحدًا فقط. عند 429 سيبرّد المحرك المشروع والموديل معًا بدل تجربة مفاتيحه الأخرى بلا فائدة.
+              </span>
+            </label>
+          )}
           <AppSelect value={credentialPurpose} onChange={event => setCredentialPurpose(event.target.value === 'content_writing_resume' ? 'content_writing_resume' : 'default')} className={inputClass}>
             <option value="default">{PURPOSE_LABELS.default}</option>
             {credentialProvider !== 'firecrawl' && credentialProvider !== 'browserless' && (
@@ -447,6 +467,11 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
                       <div className="mt-1 text-xs font-bold text-gray-500 dark:text-gray-400">
                         {PROVIDER_ACCESS_LABELS[credential.provider]} · {PURPOSE_LABELS[credential.purpose]} · {credential.keyCount} مفاتيح · {credential.keySuffixes.map(value => `••••${value}`).join('، ')}
                       </div>
+                      {credential.googleProjectId && (
+                        <div className="mt-1 text-xs font-bold text-blue-600 dark:text-blue-300" dir="ltr">
+                          Google project: {credential.googleProjectId}
+                        </div>
+                      )}
                       <div className="mt-2 flex flex-wrap gap-2 text-xs font-black">
                         {allGrant && <span className="rounded-full bg-blue-100 px-2 py-1 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"><Users size={12} className="me-1 inline" />الجميع</span>}
                         {userGrant && <span className="rounded-full bg-purple-100 px-2 py-1 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300"><UserCog size={12} className="me-1 inline" />هذا المستخدم</span>}
@@ -468,7 +493,35 @@ const AdminProviderAccessSettings: React.FC<Props> = ({ userId, onProfileUpdated
                       {allGrant && (
                         <button type="button" onClick={() => void run(`grant-delete:${allGrant.id}`, () => deleteAdminCredentialGrant(allGrant.id, userId), 'تم إلغاء التعيين العام.')} className="rounded-md border border-gray-200 px-2 py-1.5 text-xs font-black text-gray-600 dark:border-[#3C3C3C] dark:text-gray-300">إلغاء الجميع</button>
                       )}
-                      <button type="button" onClick={() => void run(`credential-toggle:${credential.id}`, () => saveAdminSharedCredential({ id: credential.id, userId, provider: credential.provider, purpose: credential.purpose, label: credential.label, enabled: !credential.enabled }), credential.enabled ? 'تم إيقاف المجموعة.' : 'تم تفعيل المجموعة.')} className="rounded-md border border-gray-200 px-2 py-1.5 text-xs font-black text-gray-600 dark:border-[#3C3C3C] dark:text-gray-300">{credential.enabled ? 'إيقاف' : 'تفعيل'}</button>
+                      {(credential.provider === 'gemini_free' || credential.provider === 'gemini_paid') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const projectId = window.prompt(
+                              'أدخل معرّف مشروع Google لهذه المجموعة. اتركه فارغًا لمسحه. يجب أن تنتمي جميع مفاتيح المجموعة إلى المشروع نفسه.',
+                              credential.googleProjectId || '',
+                            );
+                            if (projectId === null) return;
+                            void run(
+                              `credential-project:${credential.id}`,
+                              () => saveAdminSharedCredential({
+                                id: credential.id,
+                                userId,
+                                provider: credential.provider,
+                                purpose: credential.purpose,
+                                label: credential.label,
+                                googleProjectId: projectId.trim(),
+                                enabled: credential.enabled,
+                              }),
+                              projectId.trim() ? 'تم ربط المجموعة بمشروع Google.' : 'تم مسح معرّف مشروع Google.',
+                            );
+                          }}
+                          className="rounded-md border border-blue-200 px-2 py-1.5 text-xs font-black text-blue-700 dark:border-blue-900 dark:text-blue-300"
+                        >
+                          {credential.googleProjectId ? 'تعديل مشروع Google' : 'تعيين مشروع Google'}
+                        </button>
+                      )}
+                      <button type="button" onClick={() => void run(`credential-toggle:${credential.id}`, () => saveAdminSharedCredential({ id: credential.id, userId, provider: credential.provider, purpose: credential.purpose, label: credential.label, googleProjectId: credential.googleProjectId || undefined, enabled: !credential.enabled }), credential.enabled ? 'تم إيقاف المجموعة.' : 'تم تفعيل المجموعة.')} className="rounded-md border border-gray-200 px-2 py-1.5 text-xs font-black text-gray-600 dark:border-[#3C3C3C] dark:text-gray-300">{credential.enabled ? 'إيقاف' : 'تفعيل'}</button>
                       <button
                         type="button"
                         onClick={() => {

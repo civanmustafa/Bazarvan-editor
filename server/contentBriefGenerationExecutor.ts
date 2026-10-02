@@ -102,6 +102,7 @@ const executeContentBriefGeneration = async (
     prompt,
     model: aiSettings.model,
     allowModelFallback: aiSettings.allowModelFallback,
+    routingProfile: 'quality',
     requestIndex: 1,
   });
   attempts.push(...call.attempts);

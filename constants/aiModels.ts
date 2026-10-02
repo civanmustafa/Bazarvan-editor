@@ -11,6 +11,7 @@ export {
   OPENAI_ANALYSIS_MODEL,
   getGeminiFreeModelIds,
   getGeminiFreeModelLabel,
+  getGeminiRoutingModelValues,
   normalizeGeminiFreeModelId,
   normalizeGeminiPaidModelId,
   uniqueModelIds,
