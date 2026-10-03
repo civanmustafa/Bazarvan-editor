@@ -93,7 +93,10 @@ readonly TRUTHFUL_POST_WRITE_FOCUS="$(sql_scalar "select
   and to_regprocedure('public.cancel_obsolete_content_writing_preparations(uuid)') is not null
   and exists(select 1 from pg_trigger where tgname = 'finalize_obsolete_content_writing_preparations' and not tgisinternal)
   and position('cancel_requested_at is null' in pg_get_functiondef('public.automatic_article_active_stage(uuid)'::regprocedure)) > 0
-  and position('qualityOverridden' in pg_get_functiondef('public.get_automatic_article_focus()'::regprocedure)) > 0")"
+    and position('qualityOverridden' in pg_get_functiondef(coalesce(
+      to_regprocedure('public.get_automatic_article_focus_v19()'),
+      'public.get_automatic_article_focus()'::regprocedure
+    ))) > 0")"
 readonly TRASHED_ARTICLE_AUTOMATION_GUARD="$(sql_scalar "select
   to_regprocedure('public.article_is_globally_trashed(uuid)') is not null
   and exists(select 1 from pg_trigger where tgname = 'release_trashed_article_automation_after_update' and not tgisinternal)
