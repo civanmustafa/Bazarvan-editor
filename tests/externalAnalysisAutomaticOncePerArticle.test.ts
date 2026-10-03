@@ -173,6 +173,37 @@ test('competitor sequence recovers pre-provider cancellations and reports the re
   assert.match(stages, /تجهيز متطلبات التدقيقات الخارجية/);
 });
 
+test('focus payload exposes only the current task error and exact audit scheduling counts', async () => {
+  const [migration, api, client, panel] = await Promise.all([
+    readWorkspaceFile(
+      'supabase/migrations/20261025000000_focus_current_task_truth.sql',
+    ),
+    readWorkspaceFile('api/contentWritingAutomation.ts'),
+    readWorkspaceFile('utils/contentWritingAutomation.ts'),
+    readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx'),
+  ]);
+
+  assert.match(
+    migration,
+    /alter function public\.get_automatic_article_focus\(\)[\s\S]*rename to get_automatic_article_focus_v19/,
+  );
+  assert.match(migration, /'runningAuditCount'/);
+  assert.match(migration, /'scheduledAuditCount'/);
+  assert.match(migration, /'retryScheduledAuditCount'/);
+  assert.match(migration, /'lastErrorCode', v_job_error_code/);
+  assert.match(migration, /'lastError', v_job_error/);
+  assert.match(migration, /select 20;/);
+  assert.match(migration.trim(), /commit;$/);
+
+  assert.match(api, /missingPrerequisites: articleVisible \? stringList/);
+  assert.match(api, /activeStageStatus: articleVisible \? text/);
+  assert.match(api, /retryScheduledAuditCount: articleVisible/);
+  assert.match(client, /runningAuditCount: number/);
+  assert.match(client, /retryScheduledAuditCount: number/);
+  assert.match(panel, /يعمل الآن/);
+  assert.match(panel, /إعادة مجدولة/);
+});
+
 test('external analysis log identifies historical content-version results', async () => {
   const tab = await readWorkspaceFile('components/ExternalAnalysisResultsTab.tsx');
   const client = await readWorkspaceFile('utils/externalAnalysis.ts');

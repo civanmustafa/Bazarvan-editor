@@ -36,6 +36,9 @@ class ContentWritingAutomationApiError extends Error {
 }
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+const stringList = (value: unknown): string[] => Array.isArray(value)
+  ? value.map(text).filter(Boolean)
+  : [];
 
 const isArticleGloballyTrashed = (value: unknown): boolean => {
   if (!isRecord(value)) return false;
@@ -213,12 +216,22 @@ const publicAutomaticArticleFocus = async (
       state: 'idle',
       currentStage: null,
       workState: null,
+      externalInputsReady: false,
+      missingPrerequisites: [],
+      nextRequiredStage: null,
+      stageScheduled: false,
+      activeStageStatus: null,
+      activeStageStartedAt: null,
+      stageNextAttemptAt: null,
       cleanupActive: false,
       cleanupFailed: false,
       requiredAuditCount: 0,
       completedAuditCount: 0,
       activeAuditCount: 0,
       failedAuditCount: 0,
+      runningAuditCount: 0,
+      scheduledAuditCount: 0,
+      retryScheduledAuditCount: 0,
       qualityScore: null,
       qualityMinimumScore: null,
       qualityPassed: null,
@@ -260,12 +273,24 @@ const publicAutomaticArticleFocus = async (
     state: text(value.state) || 'idle',
     currentStage: text(value.currentStage) || null,
     workState: articleVisible ? text(value.workState) || null : null,
+    externalInputsReady: articleVisible && value.externalInputsReady === true,
+    missingPrerequisites: articleVisible ? stringList(value.missingPrerequisites) : [],
+    nextRequiredStage: articleVisible ? text(value.nextRequiredStage) || null : null,
+    stageScheduled: articleVisible && value.stageScheduled === true,
+    activeStageStatus: articleVisible ? text(value.activeStageStatus) || null : null,
+    activeStageStartedAt: articleVisible ? text(value.activeStageStartedAt) || null : null,
+    stageNextAttemptAt: articleVisible ? text(value.stageNextAttemptAt) || null : null,
     cleanupActive: articleVisible && value.cleanupActive === true,
     cleanupFailed: articleVisible && value.cleanupFailed === true,
     requiredAuditCount: articleVisible ? Math.max(0, Number(value.requiredAuditCount) || 0) : 0,
     completedAuditCount: articleVisible ? Math.max(0, Number(value.completedAuditCount) || 0) : 0,
     activeAuditCount: articleVisible ? Math.max(0, Number(value.activeAuditCount) || 0) : 0,
     failedAuditCount: articleVisible ? Math.max(0, Number(value.failedAuditCount) || 0) : 0,
+    runningAuditCount: articleVisible ? Math.max(0, Number(value.runningAuditCount) || 0) : 0,
+    scheduledAuditCount: articleVisible ? Math.max(0, Number(value.scheduledAuditCount) || 0) : 0,
+    retryScheduledAuditCount: articleVisible
+      ? Math.max(0, Number(value.retryScheduledAuditCount) || 0)
+      : 0,
     qualityScore: articleVisible && typeof value.qualityScore === 'number'
       && Number.isFinite(value.qualityScore) ? value.qualityScore : null,
     qualityMinimumScore: articleVisible && typeof value.qualityMinimumScore === 'number'

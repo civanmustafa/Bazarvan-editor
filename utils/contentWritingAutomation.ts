@@ -105,6 +105,9 @@ export type AutomaticArticleFocus = {
   completedAuditCount: number;
   activeAuditCount: number;
   failedAuditCount: number;
+  runningAuditCount: number;
+  scheduledAuditCount: number;
+  retryScheduledAuditCount: number;
   qualityScore: number | null;
   qualityMinimumScore: number | null;
   qualityPassed: boolean | null;
@@ -436,6 +439,9 @@ const normalizeOverview = (value: unknown): ContentWritingAutomationOverview => 
       completedAuditCount: Math.max(0, integer(focus.completedAuditCount)),
       activeAuditCount: Math.max(0, integer(focus.activeAuditCount)),
       failedAuditCount: Math.max(0, integer(focus.failedAuditCount)),
+      runningAuditCount: Math.max(0, integer(focus.runningAuditCount)),
+      scheduledAuditCount: Math.max(0, integer(focus.scheduledAuditCount)),
+      retryScheduledAuditCount: Math.max(0, integer(focus.retryScheduledAuditCount)),
       qualityScore: typeof focus.qualityScore === 'number' && Number.isFinite(focus.qualityScore)
         ? focus.qualityScore
         : null,

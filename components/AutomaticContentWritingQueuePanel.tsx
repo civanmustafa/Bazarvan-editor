@@ -517,9 +517,9 @@ const getFocusStageDetail = (
         : `Audit inputs are ready, but no audit task is scheduled (${auditProgress}).`;
     }
     if (isArabic) {
-      return `التدقيقات الخارجية: اكتمل ${auditProgress}، النشط ${focus.activeAuditCount}، والمتعثر ${focus.failedAuditCount}.`;
+      return `التدقيقات الخارجية: اكتمل ${auditProgress}، يعمل الآن ${focus.runningAuditCount}، مجدول ${focus.scheduledAuditCount}، إعادة مجدولة ${focus.retryScheduledAuditCount}، والمتعثر ${focus.failedAuditCount}.`;
     }
-    return `External audits: ${auditProgress} completed, ${focus.activeAuditCount} active, ${focus.failedAuditCount} blocked.`;
+    return `External audits: ${auditProgress} completed, ${focus.runningAuditCount} running, ${focus.scheduledAuditCount} queued, ${focus.retryScheduledAuditCount} retry scheduled, ${focus.failedAuditCount} blocked.`;
   }
   if (focus.currentStage === 'content_writing') {
     return isArabic
