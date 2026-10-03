@@ -477,6 +477,28 @@ const getFocusStageDetail = (
   isArabic: boolean,
 ): string | null => {
   const auditProgress = `${focus.completedAuditCount}/${focus.requiredAuditCount}`;
+  const prerequisiteLabels: Record<string, [string, string]> = {
+    draft_status: ['حالة المقالة يجب أن تكون مسودة', 'the article must be a draft'],
+    article_title: ['عنوان صالح للمقالة', 'a valid article title'],
+    editor_text: ['نص المقالة داخل المحرر', 'article text in the editor'],
+    primary_keyword: ['الكلمة المفتاحية الأساسية', 'the primary keyword'],
+    goal_context: ['بيانات الهدف ونوع الصفحة', 'the goal and page-type details'],
+    company_name: ['اسم الجهة أو الشركة', 'the company name'],
+    competitor_content_or_url: ['نص أو رابط منافس صالح', 'valid competitor text or URL'],
+  };
+  const missing = focus.missingPrerequisites
+    .map(code => prerequisiteLabels[code]?.[isArabic ? 0 : 1] || code)
+    .join(isArabic ? '، ' : ', ');
+  const statusLabels: Record<string, [string, string]> = {
+    running: ['يعمل الآن', 'is running now'],
+    queued: ['مجدول وبانتظار العامل', 'is queued for a worker'],
+    retry_scheduled: ['مجدول لإعادة المحاولة', 'is scheduled for retry'],
+    waiting_for_prerequisites: ['مجدول وينتظر متطلبًا سابقًا', 'is scheduled and waiting for an upstream requirement'],
+    paused: ['متوقف مؤقتًا', 'is temporarily paused'],
+  };
+  const stageState = focus.activeStageStatus
+    ? statusLabels[focus.activeStageStatus]?.[isArabic ? 0 : 1]
+    : null;
   if (focus.currentStage === 'duplicate_cleanup') {
     if (isArabic) {
       return `${focus.cleanupActive ? 'إصلاح التكرارات جارٍ الآن' : 'إصلاح التكرارات بانتظار التشغيل'}؛ بعده التدقيقات الخارجية ${auditProgress}.`;
@@ -484,6 +506,16 @@ const getFocusStageDetail = (
     return `${focus.cleanupActive ? 'Duplicate cleanup is running now' : 'Duplicate cleanup is waiting to run'}; external audits follow (${auditProgress}).`;
   }
   if (focus.currentStage === 'external_audits') {
+    if (focus.workState === 'waiting_prerequisites') {
+      return isArabic
+        ? `لم تبدأ التدقيقات الخارجية: المتطلبات الناقصة هي ${missing || 'مدخلات التحليل الخارجي'}.`
+        : `External audits have not started; missing requirements: ${missing || 'external-analysis inputs'}.`;
+    }
+    if (focus.workState === 'waiting_audits' && focus.activeAuditCount === 0) {
+      return isArabic
+        ? `مدخلات التدقيقات جاهزة، لكن لا توجد مهمة تدقيق مجدولة الآن (${auditProgress}).`
+        : `Audit inputs are ready, but no audit task is scheduled (${auditProgress}).`;
+    }
     if (isArabic) {
       return `التدقيقات الخارجية: اكتمل ${auditProgress}، النشط ${focus.activeAuditCount}، والمتعثر ${focus.failedAuditCount}.`;
     }
@@ -493,6 +525,21 @@ const getFocusStageDetail = (
     return isArabic
       ? 'جلسة كتابة المحتوى هي المهمة النشطة فعليًا الآن.'
       : 'The content-writing session is the task that is actually active now.';
+  }
+  if (focus.currentStage === 'competitor_discovery') {
+    return isArabic
+      ? `اكتشاف المنافسين ${stageState || (focus.stageScheduled ? 'مجدول' : 'غير مجدول')}. بعد اكتماله يبدأ سحب النصوص تلقائيًا.`
+      : `Competitor discovery ${stageState || (focus.stageScheduled ? 'is scheduled' : 'is not scheduled')}. Text extraction starts automatically after it completes.`;
+  }
+  if (focus.currentStage === 'competitor_extraction') {
+    return isArabic
+      ? `سحب نصوص المنافسين ${stageState || (focus.stageScheduled ? 'مجدول' : 'غير مجدول')}.`
+      : `Competitor text extraction ${stageState || (focus.stageScheduled ? 'is scheduled' : 'is not scheduled')}.`;
+  }
+  if (focus.workState === 'waiting_prerequisites') {
+    return isArabic
+      ? `المرحلة التالية غير قادرة على البدء. المتطلبات الناقصة: ${missing || 'متطلبات غير مكتملة'}.`
+      : `The next stage cannot start. Missing requirements: ${missing || 'incomplete requirements'}.`;
   }
   if (focus.currentStage === 'preparation') {
     return isArabic
@@ -1051,7 +1098,24 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                   <span>{isArabic ? 'دورة الاسترداد' : 'Recovery cycle'} {overview.focus.recoveryCount}/{overview.focus.maxRecoveries || 3}</span>
                 )}
                 {overview.focus.acquiredAt && Number.isFinite(Date.parse(overview.focus.acquiredAt)) && (
-                  <span>{isArabic ? 'بدأت:' : 'Started:'} {new Date(overview.focus.acquiredAt).toLocaleString(isArabic ? 'ar' : 'en')}</span>
+                  <span>{isArabic ? 'حجزت المسار:' : 'Lane acquired:'} {new Date(overview.focus.acquiredAt).toLocaleString(isArabic ? 'ar' : 'en')}</span>
+                )}
+                {overview.focus.activeStageStatus && (
+                  <span>
+                    {isArabic ? 'حالة المهمة:' : 'Task status:'}{' '}
+                    {{
+                      running: isArabic ? 'تعمل الآن' : 'running now',
+                      queued: isArabic ? 'مجدولة' : 'queued',
+                      retry_scheduled: isArabic ? 'إعادة مجدولة' : 'retry scheduled',
+                      waiting_for_prerequisites: isArabic ? 'بانتظار متطلب' : 'waiting for a prerequisite',
+                      paused: isArabic ? 'متوقفة مؤقتًا' : 'paused',
+                    }[overview.focus.activeStageStatus] || overview.focus.activeStageStatus}
+                  </span>
+                )}
+                {overview.focus.activeStageStatus === 'running'
+                  && overview.focus.activeStageStartedAt
+                  && Number.isFinite(Date.parse(overview.focus.activeStageStartedAt)) && (
+                  <span>{isArabic ? 'بدأ التنفيذ فعليًا:' : 'Execution started:'} {new Date(overview.focus.activeStageStartedAt).toLocaleString(isArabic ? 'ar' : 'en')}</span>
                 )}
               </div>
             )}
@@ -1103,16 +1167,23 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                 className="mt-1.5 flex items-start gap-1.5 text-[9px] font-bold text-gray-600 dark:text-gray-300"
               >
                 <Clock3 size={11} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-300" />
-                {overview.focus.nextRetryAt && Date.parse(overview.focus.nextRetryAt) > now ? (
+                {(overview.focus.stageNextAttemptAt || overview.focus.nextRetryAt)
+                  && Date.parse((overview.focus.stageNextAttemptAt || overview.focus.nextRetryAt)!) > now ? (
                   <span>
                     <span className="font-black text-amber-700 dark:text-amber-300">
                       {isArabic ? 'موعد التشغيل القادم: ' : 'Next run: '}
-                      {new Date(overview.focus.nextRetryAt).toLocaleString(isArabic ? 'ar' : 'en')}
+                      {new Date((overview.focus.stageNextAttemptAt || overview.focus.nextRetryAt)!).toLocaleString(isArabic ? 'ar' : 'en')}
                     </span>
                     <span className="block text-gray-500 dark:text-gray-400">
                       {isArabic ? 'متبقٍ ' : 'In '}
-                      {formatCountdown(Date.parse(overview.focus.nextRetryAt) - now, isArabic)}
+                      {formatCountdown(Date.parse((overview.focus.stageNextAttemptAt || overview.focus.nextRetryAt)!) - now, isArabic)}
                     </span>
+                  </span>
+                ) : !overview.focus.stageScheduled && overview.focus.workState === 'waiting_prerequisites' ? (
+                  <span className="text-red-600 dark:text-red-300">
+                    {isArabic
+                      ? 'غير مجدولة: لن يبدأ تنفيذ حتى تكتمل المتطلبات الموضحة أعلاه.'
+                      : 'Not scheduled: execution will not start until the requirements above are satisfied.'}
                   </span>
                 ) : overview.focus.state === 'needs_attention' ? (
                   <span className="text-red-600 dark:text-red-300">

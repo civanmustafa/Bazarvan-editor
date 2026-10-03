@@ -129,6 +129,50 @@ test('current-content audit migration scopes automatic command history to the re
   assert.match(migration.trim(), /commit;$/);
 });
 
+test('competitor sequence recovers pre-provider cancellations and reports the real prerequisite stage', async () => {
+  const [migration, client, panel, stages] = await Promise.all([
+    readWorkspaceFile(
+      'supabase/migrations/20261024000000_truthful_prerequisite_sequence.sql',
+    ),
+    readWorkspaceFile('utils/contentWritingAutomation.ts'),
+    readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx'),
+    readWorkspaceFile('utils/articleAutomationStages.ts'),
+  ]);
+
+  const competitor = sliceFunction(
+    migration,
+    'enqueue_competitor_discovery_job_controlled',
+    'create or replace function public.article_automation_work_readiness',
+  );
+  assert.match(competitor, /content_research_automation_changed/);
+  assert.match(competitor, /administrative_cancellation_did_not_execute_provider/);
+  assert.match(competitor, /job\.attempt_count \+ 1/);
+  assert.match(competitor, /enqueue_competitor_discovery_job_by_signature/);
+
+  const readiness = sliceFunction(
+    migration,
+    'article_automation_work_readiness',
+    'create or replace function public.automatic_article_active_stage',
+  );
+  assert.match(readiness, /external_analysis_missing_fields/);
+  assert.match(readiness, /v_state := 'waiting_prerequisites'/);
+  assert.match(readiness, /v_state := 'waiting_audits'/);
+  assert.match(readiness, /'stageScheduled'/);
+  assert.match(readiness, /'activeStageStartedAt'/);
+  assert.match(readiness, /'stageNextAttemptAt'/);
+
+  assert.match(migration, /reconcile_content_research_automation\(\)/);
+  assert.match(migration, /reconcile_automatic_competitor_extraction\(\)/);
+  assert.match(migration, /reconcile_automatic_article_focus\(\)/);
+  assert.match(migration, /select 19;/);
+  assert.match(client, /missingPrerequisites: string\[\]/);
+  assert.match(client, /stageNextAttemptAt: string \| null/);
+  assert.match(panel, /حجزت المسار:/);
+  assert.match(panel, /بدأ التنفيذ فعليًا:/);
+  assert.match(panel, /بعد اكتماله يبدأ سحب النصوص تلقائيًا/);
+  assert.match(stages, /تجهيز متطلبات التدقيقات الخارجية/);
+});
+
 test('external analysis log identifies historical content-version results', async () => {
   const tab = await readWorkspaceFile('components/ExternalAnalysisResultsTab.tsx');
   const client = await readWorkspaceFile('utils/externalAnalysis.ts');

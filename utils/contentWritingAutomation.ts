@@ -92,6 +92,13 @@ export type AutomaticArticleFocus = {
   state: 'idle' | 'active' | 'waiting_retry' | 'needs_attention';
   currentStage: string | null;
   workState: string | null;
+  externalInputsReady: boolean;
+  missingPrerequisites: string[];
+  nextRequiredStage: string | null;
+  stageScheduled: boolean;
+  activeStageStatus: string | null;
+  activeStageStartedAt: string | null;
+  stageNextAttemptAt: string | null;
   cleanupActive: boolean;
   cleanupFailed: boolean;
   requiredAuditCount: number;
@@ -247,6 +254,8 @@ export type ContentWritingWorkReadinessState =
   | 'awaiting_writing'
   | 'waiting_cleanup'
   | 'cleaning'
+  | 'waiting_prerequisites'
+  | 'waiting_audits'
   | 'auditing'
   | 'ready'
   | 'partial'
@@ -270,6 +279,13 @@ export type ContentWritingArticleSummary = {
     cleanupCurrent: boolean;
     cleanupActive: boolean;
     cleanupFailed: boolean;
+    externalInputsReady: boolean;
+    missingPrerequisites: string[];
+    nextRequiredStage: string | null;
+    stageScheduled: boolean;
+    activeStageStatus: string | null;
+    activeStageStartedAt: string | null;
+    stageNextAttemptAt: string | null;
     requiredAuditCount: number;
     completedAuditCount: number;
     activeAuditCount: number;
@@ -288,6 +304,9 @@ const isRecord = (value: unknown): value is Record<string, any> => (
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 const nullableText = (value: unknown): string | null => text(value) || null;
+const stringList = (value: unknown): string[] => Array.isArray(value)
+  ? value.map(text).filter(Boolean)
+  : [];
 const integer = (value: unknown, fallback = 0): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : fallback;
@@ -404,6 +423,13 @@ const normalizeOverview = (value: unknown): ContentWritingAutomationOverview => 
       state: focusState as AutomaticArticleFocus['state'],
       currentStage: nullableText(focus.currentStage),
       workState: nullableText(focus.workState),
+      externalInputsReady: focus.externalInputsReady === true,
+      missingPrerequisites: stringList(focus.missingPrerequisites),
+      nextRequiredStage: nullableText(focus.nextRequiredStage),
+      stageScheduled: focus.stageScheduled === true,
+      activeStageStatus: nullableText(focus.activeStageStatus),
+      activeStageStartedAt: nullableText(focus.activeStageStartedAt),
+      stageNextAttemptAt: nullableText(focus.stageNextAttemptAt),
       cleanupActive: focus.cleanupActive === true,
       cleanupFailed: focus.cleanupFailed === true,
       requiredAuditCount: Math.max(0, integer(focus.requiredAuditCount)),
@@ -628,6 +654,8 @@ const normalizeArticleSummary = (value: unknown): ContentWritingArticleSummary |
     'awaiting_writing',
     'waiting_cleanup',
     'cleaning',
+    'waiting_prerequisites',
+    'waiting_audits',
     'auditing',
     'ready',
     'partial',
@@ -638,6 +666,13 @@ const normalizeArticleSummary = (value: unknown): ContentWritingArticleSummary |
       cleanupCurrent: readinessSource.cleanupCurrent === true,
       cleanupActive: readinessSource.cleanupActive === true,
       cleanupFailed: readinessSource.cleanupFailed === true,
+      externalInputsReady: readinessSource.externalInputsReady === true,
+      missingPrerequisites: stringList(readinessSource.missingPrerequisites),
+      nextRequiredStage: nullableText(readinessSource.nextRequiredStage),
+      stageScheduled: readinessSource.stageScheduled === true,
+      activeStageStatus: nullableText(readinessSource.activeStageStatus),
+      activeStageStartedAt: nullableText(readinessSource.activeStageStartedAt),
+      stageNextAttemptAt: nullableText(readinessSource.stageNextAttemptAt),
       requiredAuditCount: integer(readinessSource.requiredAuditCount),
       completedAuditCount: integer(readinessSource.completedAuditCount),
       activeAuditCount: integer(readinessSource.activeAuditCount),

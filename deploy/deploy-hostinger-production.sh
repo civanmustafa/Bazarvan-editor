@@ -82,7 +82,7 @@ set -a
 source .env.production
 set +a
 
-BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=147 \
+BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=148 \
   bash deploy/hostinger-supabase/apply-project-migrations.sh
 
 npm ci --include=dev
@@ -125,7 +125,7 @@ fi
 pm2 describe "${CONTENT_WRITING_PREPARATION_APP}" >/dev/null
 pm2 save
 
-EXPECTED_MIGRATIONS=147 \
+EXPECTED_MIGRATIONS=148 \
   bash deploy/hostinger-supabase/verify-project-schema.sh
 
 wait_for_endpoint() {

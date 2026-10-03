@@ -127,11 +127,15 @@ const contentWritingDetails = (
   if (!summary) return locale === 'ar' ? 'لم تبدأ الكتابة التلقائية.' : 'Automatic writing has not started.';
   if (locale === 'en') {
     if (summary.state === 'applied' && summary.workReadiness?.state === 'auditing') return 'Content inserted automatically · running external audits.';
+    if (summary.state === 'applied' && summary.workReadiness?.state === 'waiting_prerequisites') return 'Content inserted automatically · preparing external-audit requirements.';
+    if (summary.state === 'applied' && summary.workReadiness?.state === 'waiting_audits') return 'Content inserted automatically · external audits are not scheduled yet.';
     if (summary.state === 'applied' && ['cleaning', 'waiting_cleanup'].includes(summary.workReadiness?.state || '')) return 'Content inserted automatically · cleaning repeated phrases.';
     if (summary.state === 'applied' && summary.workReadiness?.state === 'ready') return 'Content inserted automatically · ready for work.';
     return summary.errorMessage || `Writing status: ${summary.state}.`;
   }
   if (summary.state === 'applied' && summary.workReadiness?.state === 'auditing') return 'أدرج المحتوى تلقائيا · تنفيذ التدقيقات الخارجية';
+  if (summary.state === 'applied' && summary.workReadiness?.state === 'waiting_prerequisites') return 'أدرج المحتوى تلقائيا · تجهيز متطلبات التدقيقات الخارجية';
+  if (summary.state === 'applied' && summary.workReadiness?.state === 'waiting_audits') return 'أدرج المحتوى تلقائيا · التدقيقات الخارجية غير مجدولة';
   if (summary.state === 'applied' && ['cleaning', 'waiting_cleanup'].includes(summary.workReadiness?.state || '')) return 'أدرج المحتوى تلقائيا · تنقية المحتوى';
   if (summary.state === 'applied' && summary.workReadiness?.state === 'ready') return 'أدرج المحتوى تلقائيا · جاهزة للعمل';
   if (summary.state === 'written_quality_failed') return 'لم تتجاوز سياسة الجودة.';
