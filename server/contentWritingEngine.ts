@@ -396,17 +396,24 @@ export const prepareContentWritingConversation = async (
     allowMissingGoalContext?: boolean;
   } = {},
 ): Promise<PreparedContentWritingConversation> => {
-  const [articleSource, settings] = await Promise.all([
+  const [articleSource, settings, automationPolicy] = await Promise.all([
     readArticleInput(articleId),
     getContentWritingSettings(),
+    readArticleAutomationPolicy(articleId),
   ]);
-  const bundle = buildContentWritingPromptBundle(articleSource.input, {
+  const strictBundle = buildContentWritingPromptBundle(articleSource.input, {
     templates: settings.templates,
     maxInputTokens: settings.maxInputTokens,
     requireCompany: options.allowMissingCompany !== true,
     requireGoalContext: options.allowMissingGoalContext !== true,
     minimumCompetitors: settings.minimumCompetitors,
   });
+  const bundle: ContentWritingPromptBundle = automationPolicy.articleWritingMode === 'available_inputs'
+    ? {
+        ...strictBundle,
+        readinessIssues: strictBundle.readinessIssues.filter(issue => issue.code !== 'competitors'),
+      }
+    : strictBundle;
   assertContentWritingBundleReady(bundle);
   const normalizedGoalContext = normalizeGoalContext(articleSource.input.goalContext);
   const lengthTarget = resolveContentWritingLengthTarget({

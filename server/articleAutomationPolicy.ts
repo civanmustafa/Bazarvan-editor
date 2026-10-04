@@ -5,11 +5,20 @@ import {
 } from '../constants/userAutomation';
 import { getExternalAnalysisSupabaseAdmin, type ExternalAnalysisJob } from './externalAnalysisQueue';
 import { ExternalAnalysisTerminalError } from './externalAnalysisExecutor';
+import {
+  ARTICLE_AUTOMATION_OVERRIDE_DEFAULTS,
+  isArticleWritingMode,
+  type ArticleWritingMode,
+} from '../constants/articleAutomationOverrides';
 
 export type ArticleAutomationPolicy = UserAutomationPreferences & {
   scope: 'creator' | 'legacy';
   creatorUserId: string | null;
   policyVersion: number;
+  articleOverrideVersion: number;
+  articleWritingMode: ArticleWritingMode;
+  disabledCapabilities: string[];
+  excludedExternalCommandIds: string[];
 };
 
 // Missing schema or malformed policy must never silently enable automatic spending.
@@ -29,7 +38,22 @@ export const parseArticleAutomationPolicy = (value: unknown): ArticleAutomationP
   if (!normalized.enabled || (policy.scope === 'creator' && !creatorUserId)) {
     for (const key of USER_AUTOMATION_BOOLEAN_KEYS) normalized[key] = false;
   }
-  return { ...normalized, scope: policy.scope, creatorUserId, policyVersion: policy.policyVersion as number };
+  return {
+    ...normalized,
+    scope: policy.scope,
+    creatorUserId,
+    policyVersion: policy.policyVersion as number,
+    articleOverrideVersion: Math.max(0, Number(policy.articleOverrideVersion) || 0),
+    articleWritingMode: isArticleWritingMode(policy.articleWritingMode)
+      ? policy.articleWritingMode
+      : ARTICLE_AUTOMATION_OVERRIDE_DEFAULTS.writingMode,
+    disabledCapabilities: Array.isArray(policy.disabledCapabilities)
+      ? policy.disabledCapabilities.filter((item): item is string => typeof item === 'string')
+      : [],
+    excludedExternalCommandIds: Array.isArray(policy.excludedExternalCommandIds)
+      ? policy.excludedExternalCommandIds.filter((item): item is string => typeof item === 'string')
+      : [],
+  };
 };
 
 export const readArticleAutomationPolicy = async (articleId: string): Promise<ArticleAutomationPolicy> => {
@@ -44,8 +68,8 @@ export const automaticJobAllowedByPolicy = (
   job: Pick<ExternalAnalysisJob, 'job_type' | 'command_id' | 'requested_by'>,
   policy: ArticleAutomationPolicy,
 ): boolean => {
-  if (policy.scope === 'legacy') return true;
-  if (!policy.enabled || !policy.creatorUserId || job.requested_by !== policy.creatorUserId) return false;
+  if (policy.scope === 'legacy' && policy.articleOverrideVersion === 0) return true;
+  if (!policy.enabled || (policy.scope === 'creator' && (!policy.creatorUserId || job.requested_by !== policy.creatorUserId))) return false;
   switch (job.job_type) {
     case 'duplicate_cleanup': return policy.enabled;
     case 'semantic_keywords_lsi':
@@ -54,7 +78,9 @@ export const automaticJobAllowedByPolicy = (
     case 'competitor_extraction': return policy.autoExtractCompetitorContent;
     case 'engineering_command':
       return policy.autoRunReadyEngineeringCommands && policy.externalAnalysisCommandIds.includes(job.command_id || '');
-    case 'content_writing_preparation': return policy.contentWritingAutomationEnabled;
+    case 'content_writing_preparation':
+      return policy.contentWritingAutomationEnabled
+        && (!policy.articleWritingMode || policy.articleWritingMode === 'strict');
     default: return false;
   }
 };

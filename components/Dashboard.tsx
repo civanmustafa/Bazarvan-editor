@@ -70,6 +70,7 @@ import {
 } from '../utils/articleAccessBadges';
 import { useDashboardArticleEditorPresence, type ArticlePresenceLoadStatus } from '../hooks/useArticleEditorPresence';
 import type { ArticleEditorPresence } from '../utils/articleEditorPresence';
+import ArticleAutomationOverridesControl from './ArticleAutomationOverridesControl';
 
 const DASHBOARD_ARTICLES_PAGE_SIZE = 10;
 
@@ -1058,6 +1059,13 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                                   <ExternalLink size={13} />
                               </button>
                             </>
+                        )}
+                        {!isTrashView && articleId && onUpdateSettings && showExternalAnalysisControls && (
+                            <ArticleAutomationOverridesControl
+                                articleId={articleId}
+                                articleTitle={untranslatedTitle}
+                                onSaved={onRefreshExternalAnalysis}
+                            />
                         )}
                         {!isTrashView ? (
                             <>

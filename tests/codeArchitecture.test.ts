@@ -105,6 +105,7 @@ test('development and production use one API route registry', async () => {
     '/api/articles/save',
     '/api/external-analysis',
     '/api/articles/assigned-automation',
+    '/api/articles/automation-overrides',
     '/api/system/settings',
     '/api/admin/crawler-provider-usage',
     '/api/user/ai-provider-secrets',

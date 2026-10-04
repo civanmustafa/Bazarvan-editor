@@ -6,6 +6,7 @@ import adminCrawlerProviderUsageHandler from '../api/adminCrawlerProviderUsage';
 import adminProviderAccessHandler from '../api/adminProviderAccess';
 import aiCapabilitiesHandler from '../api/aiCapabilities';
 import articleImportHandler from '../api/articleImport';
+import articleAutomationOverridesHandler from '../api/articleAutomationOverrides';
 import articlesSaveHandler from '../api/articlesSave';
 import assignedArticleAutomationHandler from '../api/assignedArticleAutomation';
 import chatgptHandler from '../api/chatgpt';
@@ -53,6 +54,7 @@ export const API_ROUTES: readonly ApiRouteDefinition[] = [
   { id: 'article-import', method: 'ALL', path: '/api/articles/import-preview', handler: articleImportHandler },
   { id: 'n8n-articles', method: 'ALL', path: '/api/n8n/articles', handler: n8nArticlesHandler },
   { id: 'articles-save', method: 'ALL', path: '/api/articles/save', handler: articlesSaveHandler },
+  { id: 'article-automation-overrides', method: 'ALL', path: '/api/articles/automation-overrides', handler: articleAutomationOverridesHandler },
   { id: 'external-analysis', method: 'ALL', path: '/api/external-analysis', handler: externalAnalysisHandler },
   { id: 'assigned-article-automation', method: 'ALL', path: '/api/articles/assigned-automation', handler: assignedArticleAutomationHandler },
   { id: 'system-settings', method: 'ALL', path: '/api/system/settings', handler: systemSettingsHandler },

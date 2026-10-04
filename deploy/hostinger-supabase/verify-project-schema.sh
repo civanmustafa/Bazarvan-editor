@@ -6,8 +6,8 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-151}"
-readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-69}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-152}"
+readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-70}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
 
@@ -88,6 +88,17 @@ readonly UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP="$(sql_scalar "select position('go
 readonly READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED="$(sql_scalar "select not exists(select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'articles' and t.tgname = 'enqueue_article_meta_description_from_article' and not t.tgisinternal)")"
 readonly READY_STATUS_META_DESCRIPTION_SETTING_RETIRED="$(sql_scalar "select coalesce(not (value ? 'autoGenerateMetaDescription'), true) from public.app_settings where key = 'system' and not is_secret limit 1")"
 readonly AUTOMATIC_WRITING_SCHEMA_VERSION="$(sql_scalar "select coalesce(public.content_writing_automation_schema_version(), 0)")"
+readonly ARTICLE_AUTOMATION_OVERRIDES="$(sql_scalar "select
+  to_regclass('public.article_automation_overrides') is not null
+  and coalesce((select relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'article_automation_overrides'), false)
+  and to_regprocedure('public.save_article_automation_overrides(uuid,uuid,text[],text,text[],text)') is not null
+  and position('articleWritingMode' in pg_get_functiondef('public.article_automation_policy(uuid)'::regprocedure)) > 0")"
+readonly ARTICLE_AUTOMATION_OVERRIDES_PRIVILEGES="$(sql_scalar "select
+  not has_table_privilege('anon', 'public.article_automation_overrides', 'select')
+  and not has_table_privilege('authenticated', 'public.article_automation_overrides', 'select')
+  and not has_function_privilege('anon', 'public.save_article_automation_overrides(uuid,uuid,text[],text,text[],text)', 'execute')
+  and not has_function_privilege('authenticated', 'public.save_article_automation_overrides(uuid,uuid,text[],text,text[],text)', 'execute')
+  and has_function_privilege('service_role', 'public.save_article_automation_overrides(uuid,uuid,text[],text,text[],text)', 'execute')")"
 readonly RELEASED_FOCUS_REVIEW_TRUTH="$(sql_scalar "select
   to_regprocedure('public.get_automatic_article_focus_v21()') is not null
   and position('reviewMissingPrerequisites' in pg_get_functiondef('public.get_automatic_article_focus()'::regprocedure)) > 0
@@ -225,7 +236,9 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP}" == "t" ]] || fail "Semantic target stamp does not include Google metadata."
 [[ "${READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description trigger is still active."
 [[ "${READY_STATUS_META_DESCRIPTION_SETTING_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description setting still exists."
-(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 22 )) || fail "Truthful released-focus review schema is missing."
+(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 23 )) || fail "Per-article automation override schema is missing."
+[[ "${ARTICLE_AUTOMATION_OVERRIDES}" == "t" ]] || fail "Per-article automation overrides are incomplete."
+[[ "${ARTICLE_AUTOMATION_OVERRIDES_PRIVILEGES}" == "t" ]] || fail "Per-article automation overrides have unsafe browser privileges."
 [[ "${RELEASED_FOCUS_REVIEW_TRUTH}" == "t" ]] || fail "Released focus articles can still masquerade as active lane owners."
 [[ "${TRUTHFUL_POST_WRITE_FOCUS}" == "t" ]] || fail "Truthful post-write focus or obsolete preparation cleanup is missing."
 [[ "${TRASHED_ARTICLE_AUTOMATION_GUARD}" == "t" ]] || fail "Trashed articles can still own or enter automatic queues."

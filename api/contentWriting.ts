@@ -91,6 +91,7 @@ const readContentWritingInputReadiness = async (articleId: string): Promise<{
   usableCompetitorCount: number;
   pendingCompetitorCount: number;
   processingComplete: boolean;
+  writingMode: 'strict' | 'available_inputs' | 'manual_only';
 }> => {
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
     'evaluate_content_writing_automation_readiness',
@@ -103,6 +104,9 @@ const readContentWritingInputReadiness = async (articleId: string): Promise<{
     usableCompetitorCount: Math.max(0, Number(source.usableCompetitorCount) || 0),
     pendingCompetitorCount: Math.max(0, Number(source.pendingCompetitorCount) || 0),
     processingComplete: source.processingComplete === true,
+    writingMode: source.writingMode === 'available_inputs' || source.writingMode === 'manual_only'
+      ? source.writingMode
+      : 'strict',
   };
 };
 
@@ -392,7 +396,8 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
         },
       });
     }
-    if (readiness.usableCompetitorCount < minimumCompetitors || !readiness.processingComplete) {
+    if (readiness.writingMode !== 'available_inputs'
+      && (readiness.usableCompetitorCount < minimumCompetitors || !readiness.processingComplete)) {
       const preparationJob = await enqueueContentWritingCompetitorPreparation({
         articleId,
         requestedBy: principal.userId,
