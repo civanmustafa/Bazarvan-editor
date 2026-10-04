@@ -38,7 +38,7 @@ const request = async (
       })() : undefined,
     },
   );
-  const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const payload = await response.json().catch((): null => null) as Record<string, unknown> | null;
   if (!response.ok) {
     throw new Error(typeof payload?.error === 'string'
       ? payload.error

@@ -185,30 +185,6 @@ begin
 end;
 $$;
 
--- The queue trigger historically bypassed policy checks for every legacy
--- article. Preserve that behavior only while the article has no explicit
--- override; an opted-in legacy article must honor its own restrictions.
-do $queue_guard_patch$
-declare
-  v_definition text;
-  v_anchor constant text := $$  if (v_policy->>'policyVersion')::integer = 0 then return new; end if;$$;
-  v_replacement constant text := $$  if (v_policy->>'policyVersion')::integer = 0
-     and coalesce((v_policy->>'articleOverrideVersion')::integer, 0) = 0 then
-    return new;
-  end if;$$;
-begin
-  select pg_get_functiondef(
-    'public.guard_creator_automatic_external_job()'::regprocedure
-  ) into v_definition;
-  if strpos(v_definition, 'articleOverrideVersion') = 0 then
-    if strpos(v_definition, v_anchor) = 0 then
-      raise exception 'Automatic external-job policy guard changed; refusing unsafe override patch.';
-    end if;
-    execute replace(v_definition, v_anchor, v_replacement);
-  end if;
-end;
-$queue_guard_patch$;
-
 create or replace function public.automatic_content_writing_requirement(p_article_id uuid)
 returns jsonb
 language plpgsql
