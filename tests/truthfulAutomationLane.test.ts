@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { PGlite } from '@electric-sql/pglite';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readWorkspaceFile = (relativePath: string) => readFile(path.join(root, relativePath), 'utf8');
@@ -115,6 +116,174 @@ test('same-article prerequisite waits expose the running or scheduled upstream s
   assert.match(panel, /المرحلة السابقة متوقفة وتحتاج مراجعة/);
   assert.match(taskNormalizer, /upstreamStage/);
   assert.match(taskNormalizer, /upstreamState/);
+});
+
+test('competitor discovery is independent from Gemini and starts from its own exact inputs', async () => {
+  const [migration, panel] = await Promise.all([
+    readWorkspaceFile(
+      'supabase/migrations/20261026000000_independent_competitor_discovery.sql',
+    ),
+    readWorkspaceFile('components/AutomaticContentWritingQueuePanel.tsx'),
+  ]);
+
+  assert.match(migration, /create or replace function public\.evaluate_competitor_discovery_readiness/);
+  assert.match(migration, /coalesce\(p_status, ''\) <> 'draft'/);
+  assert.match(migration, /jsonb_build_array\('article_title'\)/);
+  assert.match(migration, /jsonb_build_array\('primary_keyword'\)/);
+  assert.match(migration, /jsonb_build_array\('goal_context'\)/);
+  assert.match(migration, /jsonb_build_array\('company_name'\)/);
+  assert.match(migration, /'executionPath', 'programmatic_competitor_research'/);
+
+  const enqueueStart = migration.indexOf(
+    'create or replace function public.enqueue_competitor_discovery_job_by_signature',
+  );
+  const enqueueEnd = migration.indexOf(
+    'create or replace function public.automatic_article_focus_controls_job_type',
+    enqueueStart,
+  );
+  const enqueue = migration.slice(enqueueStart, enqueueEnd);
+  assert.ok(enqueueStart >= 0 && enqueueEnd > enqueueStart);
+  assert.match(enqueue, /autoDiscoverCompetitors/);
+  assert.match(enqueue, /enqueue_competitor_discovery_job\(/);
+  assert.doesNotMatch(enqueue, /semantic_keywords_lsi/);
+  assert.doesNotMatch(enqueue, /secondaries/);
+  assert.doesNotMatch(enqueue, /\bgoogleTitles\b|\bgoogleDescriptions\b/);
+
+  const focusStart = migration.indexOf(
+    'create or replace function public.automatic_article_focus_controls_job_type',
+  );
+  const focusEnd = migration.indexOf(
+    'create or replace function public.reconcile_legacy_content_research_automation',
+    focusStart,
+  );
+  const focus = migration.slice(focusStart, focusEnd);
+  assert.doesNotMatch(focus, /'competitor_discovery'/);
+  assert.match(focus, /'semantic_keywords_lsi'/);
+  assert.match(migration, /rename to get_visible_automation_task_inventory_v20/);
+  assert.match(migration, /'independentFromAiFocus', true/);
+  assert.match(migration, /select public\.reconcile_content_research_automation\(\);/);
+  assert.doesNotMatch(migration, /cron\.schedule|pg_cron|create extension/);
+  assert.match(migration, /select 21;/);
+  assert.match(migration.trim(), /commit;$/);
+  assert.match(panel, /draft_status: \['حالة المقالة: مسودة'/);
+  assert.match(panel, /article_title: \['عنوان المقالة'/);
+});
+
+test('independent competitor discovery migration executes and evaluates only its five inputs', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20261026000000_independent_competitor_discovery.sql',
+  );
+  const db = new PGlite();
+  try {
+    await db.exec(`
+      create role anon; create role authenticated; create role service_role;
+      create table public.articles (
+        id uuid primary key,
+        status text not null default 'draft',
+        title text not null default '',
+        keywords jsonb not null default '{}'::jsonb,
+        goal_context jsonb not null default '{}'::jsonb,
+        article_language text not null default 'ar',
+        automation_policy_version integer not null default 1,
+        updated_at timestamptz not null default now()
+      );
+      create table public.ai_external_analysis_article_state (
+        article_id uuid primary key,
+        competitor_discovery_ready boolean not null default false,
+        competitor_discovery_missing_fields jsonb not null default '[]'::jsonb,
+        competitor_discovery_signature text not null default '',
+        last_article_updated_at timestamptz,
+        last_evaluated_at timestamptz,
+        updated_at timestamptz not null default now()
+      );
+      create table public.ai_external_analysis_jobs (
+        id uuid primary key default gen_random_uuid(),
+        article_id uuid not null,
+        requested_by uuid,
+        job_type text not null,
+        origin text not null default 'auto',
+        status text not null default 'queued',
+        pipeline_parent_job_id uuid,
+        readiness_signature text,
+        input_snapshot jsonb not null default '{}'::jsonb,
+        result jsonb,
+        progress jsonb not null default '{}'::jsonb,
+        last_error text,
+        last_error_code text,
+        attempt_count integer not null default 0,
+        next_attempt_at timestamptz,
+        locked_by text,
+        locked_at timestamptz,
+        lease_expires_at timestamptz,
+        cancel_requested_at timestamptz,
+        completed_at timestamptz,
+        updated_at timestamptz not null default now()
+      );
+      create function public.article_automation_policy(uuid) returns jsonb
+        language sql immutable as $$select '{"enabled":true,"autoDiscoverCompetitors":true}'::jsonb$$;
+      create function public.article_automatic_policy_allows(uuid,text,text default null)
+        returns boolean language sql immutable as $$select true$$;
+      create function public.cancel_stale_competitor_discovery_jobs(uuid,text)
+        returns integer language sql as $$select 0$$;
+      create function public.enqueue_competitor_discovery_job(uuid,uuid,text)
+        returns uuid language sql as $$select null::uuid$$;
+      create function public.get_content_research_automation_settings()
+        returns jsonb language sql immutable as $$select '{"autoGenerateAlternativeKeywords":true,"autoGenerateLsiKeywords":true,"autoDiscoverCompetitors":true}'::jsonb$$;
+      create function public.external_analysis_has_competitor_value(jsonb,integer)
+        returns boolean language sql immutable as $$select false$$;
+      create function public.semantic_keywords_have_google_metadata(jsonb)
+        returns boolean language sql immutable as $$select false$$;
+      create function public.enqueue_external_semantic_analysis_job_controlled(uuid,text)
+        returns uuid language sql as $$select null::uuid$$;
+      create function public.enqueue_competitor_discovery_job_controlled(uuid,uuid,text)
+        returns uuid language sql as $$select null::uuid$$;
+      create function public.reconcile_content_research_automation()
+        returns void language sql as $$select$$;
+      create function public.get_visible_automation_task_inventory(uuid)
+        returns jsonb language sql stable as $$select '[]'::jsonb$$;
+      create function public.content_writing_automation_schema_version()
+        returns integer language sql immutable as $$select 20$$;
+    `);
+
+    await db.exec(migration);
+
+    const ready = (await db.query<{ readiness: Record<string, unknown> }>(`
+      select public.evaluate_competitor_discovery_readiness(
+        'draft',
+        'عنوان مكتمل',
+        '{"primary":"كلمة أساسية","company":"شركة"}'::jsonb,
+        '{"pageType":"article","objective":"educate"}'::jsonb,
+        'ar'
+      ) as readiness
+    `)).rows[0].readiness;
+    assert.equal(ready.ready, true);
+    assert.deepEqual(ready.missingFields, []);
+    assert.equal(ready.executionPath, 'programmatic_competitor_research');
+
+    const missingCompany = (await db.query<{ readiness: Record<string, unknown> }>(`
+      select public.evaluate_competitor_discovery_readiness(
+        'draft',
+        'عنوان مكتمل',
+        '{"primary":"كلمة أساسية","secondaries":[],"lsi":[]}'::jsonb,
+        '{"pageType":"article","objective":"educate"}'::jsonb,
+        'ar'
+      ) as readiness
+    `)).rows[0].readiness;
+    assert.equal(missingCompany.ready, false);
+    assert.deepEqual(missingCompany.missingFields, ['company_name']);
+
+    const focus = (await db.query<{ controls_discovery: boolean; controls_ai: boolean }>(`
+      select
+        public.automatic_article_focus_controls_job_type('competitor_discovery')
+          as controls_discovery,
+        public.automatic_article_focus_controls_job_type('semantic_keywords_lsi')
+          as controls_ai
+    `)).rows[0];
+    assert.equal(focus.controls_discovery, false);
+    assert.equal(focus.controls_ai, true);
+  } finally {
+    await db.close();
+  }
 });
 
 test('post-write focus ignores historical jobs and cleans obsolete preparation work', async () => {

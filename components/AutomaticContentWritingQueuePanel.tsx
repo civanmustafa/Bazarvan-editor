@@ -254,6 +254,8 @@ const getAttemptLabel = (
 
 const getRequirementLabel = (code: string, isArabic: boolean): string => {
   const labels: Record<string, [string, string]> = {
+    draft_status: ['حالة المقالة: مسودة', 'Article status: draft'],
+    article_title: ['عنوان المقالة', 'Article title'],
     primary_keyword: ['الكلمة المفتاحية الأساسية', 'Primary keyword'],
     article_title_or_primary_keyword: ['عنوان المقالة أو الكلمة المفتاحية الأساسية', 'Article title or primary keyword'],
     alternative_keywords: ['الصيغ البديلة', 'Alternative keyword forms'],

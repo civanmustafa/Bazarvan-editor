@@ -43,10 +43,13 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-149/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-149/);
-  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=149/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-150/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-150/);
+  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=150/);
   assert.match(deployScript, /verify-project-schema\.sh/);
+  assert.match(verifyScript, /get_visible_automation_task_inventory_v20/);
+  assert.match(verifyScript, /INDEPENDENT_COMPETITOR_DISCOVERY/);
+  assert.match(verifyScript, /AUTOMATIC_WRITING_SCHEMA_VERSION >= 21/);
   assert.match(verifyScript, /get_visible_automation_task_inventory_v13/);
   assert.match(verifyScript, /release_recoverable_automatic_focus_stalls/);
   assert.match(verifyScript, /get_automatic_article_focus_v19/);

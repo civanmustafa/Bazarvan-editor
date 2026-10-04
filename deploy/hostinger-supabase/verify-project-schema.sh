@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-149}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-150}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-69}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -150,18 +150,28 @@ readonly AUTOMATION_SINGLE_MASTER_SCHEMA="$(sql_scalar "select
   and to_regprocedure('public.resume_satisfied_automatic_prerequisite_jobs(integer)') is not null
   and to_regprocedure('public.release_reclassified_automatic_focus_pauses(integer)') is not null
   and to_regprocedure('public.release_recoverable_automatic_focus_stalls(integer)') is not null
+  and to_regprocedure('public.get_visible_automation_task_inventory_v20(uuid)') is not null
   and to_regprocedure('public.get_visible_automation_task_inventory_v16(uuid)') is not null
   and to_regprocedure('public.get_visible_automation_task_inventory_v15(uuid)') is not null
   and to_regprocedure('public.get_visible_automation_task_inventory_v14(uuid)') is not null
   and to_regprocedure('public.get_visible_automation_task_inventory_v13(uuid)') is not null
   and to_regprocedure('public.get_visible_automation_task_inventory_v9(uuid)') is not null
-  and position('get_visible_automation_task_inventory_v16' in pg_get_functiondef('public.get_visible_automation_task_inventory(uuid)'::regprocedure)) > 0
+  and position('get_visible_automation_task_inventory_v20' in pg_get_functiondef('public.get_visible_automation_task_inventory(uuid)'::regprocedure)) > 0
   and position('requirements' in pg_get_functiondef('public.get_visible_automation_task_inventory(uuid)'::regprocedure)) > 0
-  and position('upstreamStage' in pg_get_functiondef('public.get_visible_automation_task_inventory(uuid)'::regprocedure)) > 0
+  and position('independentFromAiFocus' in pg_get_functiondef('public.get_visible_automation_task_inventory(uuid)'::regprocedure)) > 0
+  and position('get_visible_automation_task_inventory_v16' in pg_get_functiondef('public.get_visible_automation_task_inventory_v20(uuid)'::regprocedure)) > 0
+  and position('upstreamStage' in pg_get_functiondef('public.get_visible_automation_task_inventory_v20(uuid)'::regprocedure)) > 0
   and position('blockedByArticleTitle' in pg_get_functiondef('public.get_visible_automation_task_inventory_v16(uuid)'::regprocedure)) > 0
   and position('blockedByState' in pg_get_functiondef('public.get_visible_automation_task_inventory_v16(uuid)'::regprocedure)) > 0
   and position('get_visible_automation_task_inventory_v9' in pg_get_functiondef('public.get_visible_automation_task_inventory_v13(uuid)'::regprocedure)) > 0
   and position('reasonCode' in pg_get_functiondef('public.get_visible_automation_task_inventory_v9(uuid)'::regprocedure)) > 0")"
+readonly INDEPENDENT_COMPETITOR_DISCOVERY="$(sql_scalar "select
+  position('competitor_discovery' in pg_get_functiondef('public.automatic_article_focus_controls_job_type(text)'::regprocedure)) = 0
+  and position('semantic_keywords_lsi' in pg_get_functiondef('public.automatic_article_focus_controls_job_type(text)'::regprocedure)) > 0
+  and position('programmatic_competitor_research' in pg_get_functiondef('public.enqueue_competitor_discovery_job_by_signature(uuid,uuid,text)'::regprocedure)) > 0
+  and position('semantic_keywords_lsi' in pg_get_functiondef('public.enqueue_competitor_discovery_job_by_signature(uuid,uuid,text)'::regprocedure)) = 0
+  and position('secondaries' in pg_get_functiondef('public.enqueue_competitor_discovery_job_by_signature(uuid,uuid,text)'::regprocedure)) = 0
+  and position('googleTitles' in pg_get_functiondef('public.enqueue_competitor_discovery_job_by_signature(uuid,uuid,text)'::regprocedure)) = 0")"
 readonly AUTOMATION_RECOVERY_SCHEDULE="$(sql_scalar "select to_regprocedure('public.get_visible_automatic_recovery_schedule(uuid)') is not null and not has_function_privilege('anon', 'public.get_visible_automatic_recovery_schedule(uuid)', 'execute') and not has_function_privilege('authenticated', 'public.get_visible_automatic_recovery_schedule(uuid)', 'execute') and has_function_privilege('service_role', 'public.get_visible_automatic_recovery_schedule(uuid)', 'execute')")"
 readonly EXTERNAL_DEPENDENCY_CHILD_GUARD="$(sql_scalar "select exists(select 1 from pg_trigger where tgname = 'enforce_external_analysis_dependency_on_child' and not tgisinternal) and to_regprocedure('public.enforce_external_analysis_dependency_on_child()') is not null")"
 readonly EXTERNAL_DEPENDENCY_CHILD_GUARD_PRIVILEGES="$(sql_scalar "select not has_function_privilege('anon', 'public.enforce_external_analysis_dependency_on_child()', 'execute') and not has_function_privilege('authenticated', 'public.enforce_external_analysis_dependency_on_child()', 'execute') and has_function_privilege('service_role', 'public.enforce_external_analysis_dependency_on_child()', 'execute')")"
@@ -211,7 +221,7 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP}" == "t" ]] || fail "Semantic target stamp does not include Google metadata."
 [[ "${READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description trigger is still active."
 [[ "${READY_STATUS_META_DESCRIPTION_SETTING_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description setting still exists."
-(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 18 )) || fail "Truthful post-write focus automation schema is missing."
+(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 21 )) || fail "Independent competitor-discovery automation schema is missing."
 [[ "${TRUTHFUL_POST_WRITE_FOCUS}" == "t" ]] || fail "Truthful post-write focus or obsolete preparation cleanup is missing."
 [[ "${TRASHED_ARTICLE_AUTOMATION_GUARD}" == "t" ]] || fail "Trashed articles can still own or enter automatic queues."
 [[ "${EXTERNAL_GEMINI_BUDGET_COLUMNS}" == "4" ]] || fail "External Gemini attempt/recovery budget columns are incomplete."
@@ -248,6 +258,7 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${AUTOMATION_TASK_INVENTORY_FUNCTION}" == "t" ]] || fail "Permission-aware automation task inventory function is missing."
 [[ "${AUTOMATION_TASK_INVENTORY_PRIVILEGES}" == "t" ]] || fail "Automation task inventory privileges are unsafe or incomplete."
 [[ "${AUTOMATION_SINGLE_MASTER_SCHEMA}" == "t" ]] || fail "Single-master automation or truthful queue reasons are missing."
+[[ "${INDEPENDENT_COMPETITOR_DISCOVERY}" == "t" ]] || fail "Competitor discovery is still coupled to the Gemini automation lane."
 [[ "${AUTOMATION_RECOVERY_SCHEDULE}" == "t" ]] || fail "Permission-aware automatic recovery schedule is missing or unsafe."
 [[ "${EXTERNAL_DEPENDENCY_CHILD_GUARD}" == "t" ]] || fail "Child-side terminal dependency guard is missing."
 [[ "${EXTERNAL_DEPENDENCY_CHILD_GUARD_PRIVILEGES}" == "t" ]] || fail "Child-side terminal dependency guard has unsafe browser privileges."
