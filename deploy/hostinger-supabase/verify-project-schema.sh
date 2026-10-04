@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-153}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-154}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-70}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -184,6 +184,8 @@ readonly INDEPENDENT_COMPETITOR_DISCOVERY="$(sql_scalar "select
   position('competitor_discovery' in pg_get_functiondef('public.automatic_article_focus_controls_job_type(text)'::regprocedure)) = 0
   and position('semantic_keywords_lsi' in pg_get_functiondef('public.automatic_article_focus_controls_job_type(text)'::regprocedure)) > 0
   and position('programmatic_competitor_research' in pg_get_functiondef('public.enqueue_competitor_discovery_job_by_signature(uuid,uuid,text)'::regprocedure)) > 0
+  and position('independentFromSemanticGeneration' in pg_get_functiondef('public.enqueue_competitor_discovery_job_by_signature(uuid,uuid,text)'::regprocedure)) > 0
+  and position('content_research_automation_changed' in pg_get_functiondef('public.enqueue_competitor_discovery_job_by_signature(uuid,uuid,text)'::regprocedure)) > 0
   and position('semantic_keywords_lsi' in pg_get_functiondef('public.enqueue_competitor_discovery_job_by_signature(uuid,uuid,text)'::regprocedure)) = 0
   and position('secondaries' in pg_get_functiondef('public.enqueue_competitor_discovery_job_by_signature(uuid,uuid,text)'::regprocedure)) = 0
   and position('googleTitles' in pg_get_functiondef('public.enqueue_competitor_discovery_job_by_signature(uuid,uuid,text)'::regprocedure)) = 0")"
@@ -236,7 +238,7 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP}" == "t" ]] || fail "Semantic target stamp does not include Google metadata."
 [[ "${READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description trigger is still active."
 [[ "${READY_STATUS_META_DESCRIPTION_SETTING_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description setting still exists."
-(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 23 )) || fail "Per-article automation override schema is missing."
+(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 24 )) || fail "Independent competitor-discovery runtime recovery schema is missing."
 [[ "${ARTICLE_AUTOMATION_OVERRIDES}" == "t" ]] || fail "Per-article automation overrides are incomplete."
 [[ "${ARTICLE_AUTOMATION_OVERRIDES_PRIVILEGES}" == "t" ]] || fail "Per-article automation overrides have unsafe browser privileges."
 [[ "${RELEASED_FOCUS_REVIEW_TRUTH}" == "t" ]] || fail "Released focus articles can still masquerade as active lane owners."

@@ -460,6 +460,28 @@ test('competitor discovery stop control requests durable cancellation and keeps 
   assert.match(executor, /signal: context\.signal/);
 });
 
+test('automatic competitor discovery runs independently from Gemini semantic generation and revives legacy waits', async () => {
+  const [guard, migration, activityCard, liveMonitor] = await Promise.all([
+    readWorkspaceFile('server/contentResearchAutomationGuard.ts'),
+    readWorkspaceFile('supabase/migrations/20261029000000_independent_competitor_discovery_runtime.sql'),
+    readWorkspaceFile('components/ExternalAnalysisCardControls.tsx'),
+    readWorkspaceFile('components/AiKeyUsageToast.tsx'),
+  ]);
+
+  const discoveryBypass = guard.indexOf("if (job.job_type === 'competitor_discovery') return;");
+  const semanticLookup = guard.indexOf(".eq('job_type', 'semantic_keywords_lsi')");
+  assert.ok(discoveryBypass > 0 && semanticLookup > discoveryBypass);
+  assert.match(migration, /job\.last_error_code = 'content_research_automation_changed'/);
+  assert.match(migration, /job\.progress->>'blockedBy' = 'semantic_keywords'/);
+  assert.match(migration, /status = 'queued'/);
+  assert.match(migration, /independentFromSemanticGeneration/);
+  assert.match(migration, /select 24;/);
+  assert.match(activityCard, /active && job\.status !== 'running'/);
+  assert.match(activityCard, /removeAiExecutionActivity\(activityId\)/);
+  assert.match(liveMonitor, /NON_EXECUTING_ACTIVITY_STAGES/);
+  assert.match(liveMonitor, /waiting_for_prerequisites/);
+});
+
 test('competitor extraction tries each deterministic crawler once, then replaces or fails without AI', async () => {
   const [executor, panel] = await Promise.all([
     readWorkspaceFile('server/competitorExtractionExecutor.ts'),

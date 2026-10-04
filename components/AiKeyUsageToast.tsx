@@ -40,6 +40,14 @@ import { getSupabaseClient } from '../utils/supabaseClient';
 
 const TERMINAL_NOTICE_TTL_MS = 60_000;
 const MAX_TERMINAL_FEED_ACTIVITIES = 24;
+const NON_EXECUTING_ACTIVITY_STAGES = new Set([
+  'queued',
+  'waiting_for_prerequisites',
+  'retry_scheduled',
+  'paused',
+  'awaiting_review',
+  'needs_input',
+]);
 
 const SURFACE_LABELS: Record<string, [string, string]> = {
   semantic_keywords_lsi: ['توليد الصيغ وLSI', 'Alternatives and LSI'],
@@ -357,7 +365,9 @@ export const DashboardAiExecutionMonitor: React.FC<DashboardAiExecutionMonitorPr
   const { uiLanguage } = useUser();
   const isArabic = isArabicOverride ?? uiLanguage !== 'en';
   const { activities, now } = useAiExecutionActivityFeed();
-  const runningActivities = getRunningAiExecutionActivities(activities);
+  const runningActivities = getRunningAiExecutionActivities(activities).filter(activity => (
+    !NON_EXECUTING_ACTIVITY_STAGES.has(activity.stage.trim().toLowerCase())
+  ));
   const runningArticleCount = new Set(runningActivities.map(activity => (
     activity.articleId || activity.articleKey || activity.id
   ))).size;
@@ -538,13 +548,9 @@ export const DashboardAiExecutionMonitor: React.FC<DashboardAiExecutionMonitorPr
                 </div>
                 {isStale && (
                   <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] font-bold leading-5 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                    {activity.stage === 'queued'
-                      ? (isArabic
-                          ? 'بقيت المهمة في الصف بلا تحديث من الخادم؛ تحقّق من عامل التنفيذ.'
-                          : 'The task has remained queued without a server update; check its worker.')
-                      : (isArabic
-                          ? 'لم تصل تحديثات حديثة من الخادم؛ قد يكون التنفيذ متوقفًا.'
-                          : 'No recent server updates were received; execution may be stalled.')}
+                    {isArabic
+                      ? 'لم تصل تحديثات حديثة من الخادم؛ قد يكون التنفيذ متوقفًا.'
+                      : 'No recent server updates were received; execution may be stalled.'}
                   </div>
                 )}
               </div>

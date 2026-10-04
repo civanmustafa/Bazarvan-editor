@@ -42,6 +42,7 @@ import {
   beginAiExecutionActivity,
   finishAiExecutionActivity,
   getAiExecutionActivities,
+  removeAiExecutionActivity,
   updateAiExecutionActivity,
 } from '../utils/aiExecutionActivity';
 import type { ContentWritingArticleSummary } from '../utils/contentWritingAutomation';
@@ -269,6 +270,18 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
         updatedAt: job.updated_at,
         ...(job.completed_at ? { completedAt: job.completed_at } : {}),
       };
+
+      // Queue and prerequisite states belong to the automation-stage cards,
+      // not to the live execution monitor. Keeping them in the shared activity
+      // store makes an idle queue look busy and eventually raises a false
+      // "no server updates" warning for work that has not started.
+      if (active && job.status !== 'running') {
+        if (existingActivity?.state === 'running') {
+          removeAiExecutionActivity(activityId);
+        }
+        return;
+      }
+
       if (active) {
         if (existingActivity && existingActivity.state !== 'running' && !serverRevisionIsNewer) return;
         if (!existingActivity || serverRevisionIsNewer) {

@@ -99,6 +99,14 @@ export const assertAutomaticCompetitorResearchAllowed = async (
     );
   }
 
+  // Discovery is a deterministic search-and-selection path. Its durable
+  // readiness contract already verifies the draft, title, primary keyword,
+  // company, and goal context before the job is queued. It must therefore not
+  // wait for Gemini-generated alternatives, LSI terms, or Google metadata.
+  // Extraction keeps the semantic guard below because it feeds later
+  // comparison and writing stages that can consume those generated terms.
+  if (job.job_type === 'competitor_discovery') return;
+
   const supabase = getExternalAnalysisSupabaseAdmin();
   const [articleResult, semanticResult] = await Promise.all([
     supabase

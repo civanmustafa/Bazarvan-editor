@@ -286,6 +286,88 @@ test('independent competitor discovery migration executes and evaluates only its
   }
 });
 
+test('independent discovery runtime migration requeues only obsolete semantic waits', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20261029000000_independent_competitor_discovery_runtime.sql',
+  );
+  const db = new PGlite();
+  const articleId = '61000000-0000-4000-8000-000000000001';
+  try {
+    await db.exec(`
+      create role anon; create role authenticated; create role service_role;
+      create table public.ai_external_analysis_article_state (
+        article_id uuid primary key,
+        competitor_discovery_ready boolean not null default false,
+        competitor_discovery_signature text not null default ''
+      );
+      create table public.ai_external_analysis_jobs (
+        id uuid primary key default gen_random_uuid(),
+        article_id uuid not null,
+        requested_by uuid,
+        job_type text not null,
+        origin text not null default 'auto',
+        status text not null default 'queued',
+        pipeline_parent_job_id uuid,
+        readiness_signature text,
+        result jsonb,
+        progress jsonb not null default '{}'::jsonb,
+        last_error text,
+        last_error_code text,
+        next_attempt_at timestamptz,
+        locked_by text,
+        locked_at timestamptz,
+        lease_expires_at timestamptz,
+        cancel_requested_at timestamptz,
+        started_at timestamptz,
+        completed_at timestamptz,
+        updated_at timestamptz not null default now()
+      );
+      create function public.article_automation_policy(uuid) returns jsonb
+        language sql immutable as $$select '{"enabled":true,"autoDiscoverCompetitors":true}'::jsonb$$;
+      create function public.article_automatic_policy_allows(uuid,text,text default null)
+        returns boolean language sql immutable as $$select true$$;
+      create function public.cancel_stale_competitor_discovery_jobs(uuid,text)
+        returns integer language sql as $$select 0$$;
+      create function public.enqueue_competitor_discovery_job(uuid,uuid,text)
+        returns uuid language sql as $$select null::uuid$$;
+      create function public.content_writing_automation_schema_version()
+        returns integer language sql immutable as $$select 23$$;
+
+      insert into public.ai_external_analysis_article_state(
+        article_id,competitor_discovery_ready,competitor_discovery_signature
+      ) values ('${articleId}',true,'ready-signature');
+      insert into public.ai_external_analysis_jobs(
+        article_id,job_type,origin,status,readiness_signature,last_error_code,last_error,progress
+      ) values (
+        '${articleId}','competitor_discovery','auto','waiting_for_prerequisites',
+        'ready-signature','content_research_automation_changed','obsolete guard',
+        '{"stage":"waiting_for_prerequisites","blockedBy":"semantic_keywords","waitingPrerequisite":true}'::jsonb
+      );
+    `);
+
+    await db.exec(migration);
+
+    const repaired = (await db.query<{
+      status: string;
+      last_error_code: string | null;
+      progress: Record<string, unknown>;
+      version: number;
+    }>(`
+      select job.status,job.last_error_code,job.progress,
+        public.content_writing_automation_schema_version() as version
+      from public.ai_external_analysis_jobs as job
+      where job.article_id='${articleId}'
+    `)).rows[0];
+    assert.equal(repaired.status, 'queued');
+    assert.equal(repaired.last_error_code, null);
+    assert.equal(repaired.progress.blockedBy, undefined);
+    assert.equal(repaired.progress.independentFromSemanticGeneration, true);
+    assert.equal(repaired.version, 24);
+  } finally {
+    await db.close();
+  }
+});
+
 test('post-write focus ignores historical jobs and cleans obsolete preparation work', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20261022000000_truthful_post_write_focus.sql',
