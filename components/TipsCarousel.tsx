@@ -1,6 +1,6 @@
 import AppSelect from './AppSelect';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Languages, Lightbulb } from 'lucide-react';
+import { CircleDot, Languages, Lightbulb, ShieldCheck } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 import { useEditorSelector } from '../contexts/EditorContext';
 import { ARTICLE_STATUS_DEFINITIONS } from '../constants/articleStatuses';
@@ -9,6 +9,7 @@ import {
   getRemoteArticleEditorSettings,
   type RemoteArticleEditorSettings,
 } from '../utils/supabaseArticles';
+import ArticleAutomationOverridesControl from './ArticleAutomationOverridesControl';
 
 const ARTICLE_ACCESS_ROLE_LABELS: Record<string, { ar: string; en: string }> = {
   viewer: { ar: 'عرض', en: 'View' },
@@ -23,6 +24,7 @@ const TipsCarousel: React.FC<TipsCarouselProps> = ({ interval = 20000 }) => {
   const { t, isIdle, uiLanguage } = useUser();
   const articleLanguage = useEditorSelector(context => context.articleLanguage);
   const activeArticleId = useEditorSelector(context => context.activeArticleId);
+  const articleTitle = useEditorSelector(context => context.title);
   const handleLanguageChange = useEditorSelector(context => context.handleLanguageChange);
   const activeArticleSettings = useEditorSelector(context => context.activeArticleSettings);
   const handleActiveArticleStatusChange = useEditorSelector(context => context.handleActiveArticleStatusChange);
@@ -108,9 +110,11 @@ const TipsCarousel: React.FC<TipsCarouselProps> = ({ interval = 20000 }) => {
         <label
           data-article-status-control="true"
           data-status-loading={displayedStatus ? undefined : 'true'}
-          className="inline-flex h-7 min-w-[150px] items-center gap-1 rounded-md bg-white/55 px-2 text-[11px] font-black text-[#806718] dark:bg-black/15 dark:text-[#f2d675]"
+          title={uiLanguage === 'ar' ? 'حالة المقالة' : 'Article status'}
+          className="inline-flex h-7 min-w-[138px] items-center gap-1 rounded-md bg-white/55 px-2 text-[11px] font-black text-[#806718] dark:bg-black/15 dark:text-[#f2d675]"
         >
-          <span>{uiLanguage === 'ar' ? 'الحالة:' : 'Status:'}</span>
+          <CircleDot size={14} className="shrink-0" aria-hidden="true" />
+          <span className="sr-only">{uiLanguage === 'ar' ? 'حالة المقالة' : 'Article status'}</span>
           <AppSelect
             size="compact"
             value={displayedStatus}
@@ -132,9 +136,26 @@ const TipsCarousel: React.FC<TipsCarouselProps> = ({ interval = 20000 }) => {
           </AppSelect>
         </label>
 
+        {settingsArticleId && (
+          <span
+            data-article-automation-overrides-control="true"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/55 dark:bg-black/15"
+          >
+            <ArticleAutomationOverridesControl
+              articleId={settingsArticleId}
+              articleTitle={articleTitle}
+            />
+          </span>
+        )}
+
         {displayedAccessRole && (
-          <span className="inline-flex h-7 items-center rounded-md bg-white/55 px-2 text-[11px] font-black text-gray-600 dark:bg-black/15 dark:text-gray-300">
-            {uiLanguage === 'ar' ? 'الصلاحية:' : 'Access:'}{' '}
+          <span
+            data-article-access-control="true"
+            className="inline-flex h-7 items-center gap-1 rounded-md bg-white/55 px-2 text-[11px] font-black text-gray-600 dark:bg-black/15 dark:text-gray-300"
+            title={uiLanguage === 'ar' ? 'صلاحية الوصول إلى المقالة' : 'Article access permission'}
+          >
+            <ShieldCheck size={14} className="shrink-0" aria-hidden="true" />
+            <span className="sr-only">{uiLanguage === 'ar' ? 'الصلاحية' : 'Access'}</span>
             {ARTICLE_ACCESS_ROLE_LABELS[displayedAccessRole]?.[uiLanguage] || displayedAccessRole}
           </span>
         )}

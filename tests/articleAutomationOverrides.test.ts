@@ -49,15 +49,20 @@ test('migration overlays policy, bypasses only competitor gates, and cancels exc
   assert.equal((migration.match(/\$claim_patch\$/g) || []).length, 2);
 });
 
-test('dashboard exposes a per-article modal and API route without changing defaults', async () => {
-  const [dashboard, control, api, registry, engine] = await Promise.all([
+test('dashboard and editor expose a per-article modal and API route without changing defaults', async () => {
+  const [dashboard, editorHeader, control, api, registry, engine] = await Promise.all([
     readWorkspaceFile('components/Dashboard.tsx'),
+    readWorkspaceFile('components/TipsCarousel.tsx'),
     readWorkspaceFile('components/ArticleAutomationOverridesControl.tsx'),
     readWorkspaceFile('api/articleAutomationOverrides.ts'),
     readWorkspaceFile('server/apiRouteRegistry.ts'),
     readWorkspaceFile('server/contentWritingEngine.ts'),
   ]);
   assert.match(dashboard, /ArticleAutomationOverridesControl/);
+  assert.match(editorHeader, /data-article-automation-overrides-control="true"/);
+  assert.match(editorHeader, /<CircleDot[\s\S]*data-article-access-control="true"[\s\S]*<ShieldCheck/);
+  assert.doesNotMatch(editorHeader, />\{uiLanguage === 'ar' \? 'الحالة:'/);
+  assert.doesNotMatch(editorHeader, />\{uiLanguage === 'ar' \? 'الصلاحية:'/);
   assert.match(control, /استعادة الوراثة الافتراضية/);
   assert.match(control, /الكتابة بالمدخلات المتاحة/);
   assert.match(control, /كتابة يدوية فقط/);
