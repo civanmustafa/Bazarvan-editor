@@ -77,6 +77,10 @@ test('finish-first migration contains one shared automatic article lane', async 
   assert.match(panel, /آخر مقالة تحتاج مراجعة/);
   assert.match(panel, /data-released-focus-review/);
   assert.match(panel, /reviewMissingPrerequisites/);
+  assert.match(panel, /reviewMissingPrerequisites\?\.length/);
+  assert.match(panel, /codes \|\| \[\]/);
+  assert.match(client, /reviewMissingPrerequisites: stringList\(focus\.reviewMissingPrerequisites\)/);
+  assert.match(client, /laneAvailable: focus\.laneAvailable === true/);
   assert.match(panel, /المقالة التالية المتوقعة/);
   assert.match(panel, /موعد التشغيل القادم/);
   assert.match(panel, /data-automatic-next-start/);

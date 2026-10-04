@@ -484,8 +484,8 @@ const FOCUS_PREREQUISITE_LABELS: Record<string, [string, string]> = {
   competitor_content_or_url: ['نص أو رابط منافس صالح', 'valid competitor text or URL'],
 };
 
-const getFocusPrerequisiteLabels = (codes: string[], isArabic: boolean): string => (
-  codes
+const getFocusPrerequisiteLabels = (codes: string[] | null | undefined, isArabic: boolean): string => (
+  (codes || [])
     .map(code => FOCUS_PREREQUISITE_LABELS[code]?.[isArabic ? 0 : 1] || code)
     .join(isArabic ? '، ' : ', ')
 );
@@ -1275,7 +1275,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
               </span>
             )}
             {isAdmin && (overview.focus.articleId
-              || (overview.focus.canResume && overview.focus.reviewMissingPrerequisites.length === 0)) && (
+              || (overview.focus.canResume && (overview.focus.reviewMissingPrerequisites?.length || 0) === 0)) && (
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {overview.focus.articleId ? (
                   <button

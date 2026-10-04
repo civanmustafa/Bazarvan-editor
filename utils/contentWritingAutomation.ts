@@ -478,6 +478,15 @@ const normalizeOverview = (value: unknown): ContentWritingAutomationOverview => 
       lastReleaseReason: nullableText(focus.lastReleaseReason),
       releasedAt: nullableText(focus.releasedAt),
       canResume: focus.canResume === true,
+      laneAvailable: focus.laneAvailable === true || !nullableText(focus.articleId),
+      reviewArticleId: nullableText(focus.reviewArticleId) || nullableText(focus.lastArticleId),
+      reviewArticleTitle: text(focus.reviewArticleTitle) || text(focus.lastArticleTitle),
+      reviewWorkState: nullableText(focus.reviewWorkState),
+      reviewMissingPrerequisites: stringList(focus.reviewMissingPrerequisites),
+      reviewNextRequiredStage: nullableText(focus.reviewNextRequiredStage),
+      reviewStageScheduled: focus.reviewStageScheduled === true,
+      reviewLastError: nullableText(focus.reviewLastError),
+      reviewReleasedAt: nullableText(focus.reviewReleasedAt) || nullableText(focus.releasedAt),
     } : null,
     candidates: Array.isArray(source.candidates) ? source.candidates.flatMap(candidate => {
       if (!isRecord(candidate) || !text(candidate.articleId)) return [];
