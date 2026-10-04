@@ -125,6 +125,31 @@ fi
 pm2 describe "${CONTENT_WRITING_PREPARATION_APP}" >/dev/null
 pm2 save
 
+# A migration can revive competitor-discovery rows while the previous worker
+# process is still serving. Run the idempotent recovery function again only
+# after every worker has restarted on the deployed commit, so an old runtime
+# cannot put the rows back behind the retired semantic-keywords prerequisite.
+docker exec -i "${DB_CONTAINER:-supabase-db}" \
+  psql -X -U "${DB_USER:-postgres}" -d "${DB_NAME:-postgres}" \
+    -v ON_ERROR_STOP=1 -Atq <<'SQL'
+select public.enqueue_competitor_discovery_job_by_signature(
+  recoverable.article_id,
+  null,
+  'auto'
+)
+from (
+  select distinct job.article_id
+  from public.ai_external_analysis_jobs as job
+  where job.job_type = 'competitor_discovery'
+    and job.origin = 'auto'
+    and job.pipeline_parent_job_id is null
+    and job.status = 'waiting_for_prerequisites'
+    and job.result is null
+    and job.last_error_code = 'content_research_automation_changed'
+    and job.progress->>'blockedBy' = 'semantic_keywords'
+) as recoverable;
+SQL
+
 EXPECTED_MIGRATIONS=154 \
   bash deploy/hostinger-supabase/verify-project-schema.sh
 

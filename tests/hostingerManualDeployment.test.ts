@@ -18,6 +18,9 @@ test('manual Hostinger deployment verifies the commit and restarts only approved
   assert.match(script, /npm run build/);
   assert.match(script, /pm2 describe/);
   assert.match(script, /pm2 save/);
+  assert.match(script, /enqueue_competitor_discovery_job_by_signature/);
+  assert.match(script, /content_research_automation_changed/);
+  assert.match(script, /blockedBy.*semantic_keywords/s);
   assert.doesNotMatch(script, /pm2 restart all/);
   assert.match(script, /bazarvan-editor-staging/);
   assert.match(script, /bazarvan-staging-content-writing-worker/);
