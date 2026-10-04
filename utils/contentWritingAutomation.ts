@@ -89,6 +89,7 @@ export type AutomaticArticleFocus = {
   articleId: string | null;
   articleTitle: string;
   articleVisible: boolean;
+  laneAvailable: boolean;
   state: 'idle' | 'active' | 'waiting_retry' | 'needs_attention';
   currentStage: string | null;
   workState: string | null;
@@ -128,6 +129,14 @@ export type AutomaticArticleFocus = {
   lastReleaseReason: string | null;
   releasedAt: string | null;
   canResume: boolean;
+  reviewArticleId: string | null;
+  reviewArticleTitle: string;
+  reviewWorkState: string | null;
+  reviewMissingPrerequisites: string[];
+  reviewNextRequiredStage: string | null;
+  reviewStageScheduled: boolean;
+  reviewLastError: string | null;
+  reviewReleasedAt: string | null;
 };
 
 export type ContentWritingAutomationOverview = {

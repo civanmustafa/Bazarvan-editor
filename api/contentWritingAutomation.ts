@@ -213,6 +213,7 @@ const publicAutomaticArticleFocus = async (
       articleId: null,
       articleTitle: '',
       articleVisible: true,
+      laneAvailable: true,
       state: 'idle',
       currentStage: null,
       workState: null,
@@ -252,6 +253,14 @@ const publicAutomaticArticleFocus = async (
       lastReleaseReason: 'article_trashed',
       releasedAt: text(value.releasedAt) || null,
       canResume: false,
+      reviewArticleId: null,
+      reviewArticleTitle: '',
+      reviewWorkState: null,
+      reviewMissingPrerequisites: [],
+      reviewNextRequiredStage: null,
+      reviewStageScheduled: false,
+      reviewLastError: null,
+      reviewReleasedAt: null,
     };
   }
 
@@ -270,6 +279,7 @@ const publicAutomaticArticleFocus = async (
     articleId: articleVisible ? articleId || null : null,
     articleTitle: articleVisible ? text(value.articleTitle) : '',
     articleVisible,
+    laneAvailable: !articleId,
     state: text(value.state) || 'idle',
     currentStage: text(value.currentStage) || null,
     workState: articleVisible ? text(value.workState) || null : null,
@@ -316,6 +326,22 @@ const publicAutomaticArticleFocus = async (
     lastReleaseReason: articleVisible ? text(value.lastReleaseReason) || null : null,
     releasedAt: articleVisible ? text(value.releasedAt) || null : null,
     canResume: articleVisible && value.canResume === true,
+    reviewArticleId: articleVisible
+      ? text(value.reviewArticleId) || lastArticleId || null
+      : null,
+    reviewArticleTitle: articleVisible
+      ? text(value.reviewArticleTitle) || text(value.lastArticleTitle)
+      : '',
+    reviewWorkState: articleVisible ? text(value.reviewWorkState) || null : null,
+    reviewMissingPrerequisites: articleVisible
+      ? stringList(value.reviewMissingPrerequisites)
+      : [],
+    reviewNextRequiredStage: articleVisible
+      ? text(value.reviewNextRequiredStage) || null
+      : null,
+    reviewStageScheduled: articleVisible && value.reviewStageScheduled === true,
+    reviewLastError: articleVisible ? text(value.reviewLastError) || null : null,
+    reviewReleasedAt: articleVisible ? text(value.reviewReleasedAt) || null : null,
   };
 };
 

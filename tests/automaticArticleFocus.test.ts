@@ -73,6 +73,10 @@ test('finish-first migration contains one shared automatic article lane', async 
   assert.match(api, /skip_automatic_article_focus/);
   assert.match(client, /AutomaticArticleFocus/);
   assert.match(panel, /أولوية إنهاء المقالة الحالية/);
+  assert.match(panel, /مسار الأتمتة متاح/);
+  assert.match(panel, /آخر مقالة تحتاج مراجعة/);
+  assert.match(panel, /data-released-focus-review/);
+  assert.match(panel, /reviewMissingPrerequisites/);
   assert.match(panel, /المقالة التالية المتوقعة/);
   assert.match(panel, /موعد التشغيل القادم/);
   assert.match(panel, /data-automatic-next-start/);

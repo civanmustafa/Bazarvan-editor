@@ -474,23 +474,43 @@ const getFocusStageLabel = (stage: string | null, isArabic: boolean): string => 
     || (normalized || (isArabic ? 'تجهيز المدخلات' : 'Preparing inputs'));
 };
 
+const FOCUS_PREREQUISITE_LABELS: Record<string, [string, string]> = {
+  draft_status: ['حالة المقالة يجب أن تكون مسودة', 'the article must be a draft'],
+  article_title: ['عنوان صالح للمقالة', 'a valid article title'],
+  editor_text: ['نص المقالة داخل المحرر', 'article text in the editor'],
+  primary_keyword: ['الكلمة المفتاحية الأساسية', 'the primary keyword'],
+  goal_context: ['بيانات الهدف ونوع الصفحة', 'the goal and page-type details'],
+  company_name: ['اسم الجهة أو الشركة', 'the company name'],
+  competitor_content_or_url: ['نص أو رابط منافس صالح', 'valid competitor text or URL'],
+};
+
+const getFocusPrerequisiteLabels = (codes: string[], isArabic: boolean): string => (
+  codes
+    .map(code => FOCUS_PREREQUISITE_LABELS[code]?.[isArabic ? 0 : 1] || code)
+    .join(isArabic ? '، ' : ', ')
+);
+
+const getReleasedFocusReviewDetail = (
+  focus: NonNullable<ContentWritingAutomationOverview['focus']>,
+  isArabic: boolean,
+): string => {
+  const missing = getFocusPrerequisiteLabels(focus.reviewMissingPrerequisites, isArabic);
+  if (missing) {
+    return isArabic
+      ? `المتطلبات الناقصة: ${missing}. هذه المقالة لا تحجز المسار، وبعد استكمال المتطلبات يعاد تقييمها تلقائيًا.`
+      : `Missing requirements: ${missing}. This article does not hold the lane and will be re-evaluated automatically after they are completed.`;
+  }
+  return isArabic
+    ? 'المقالة لا تحجز المسار الآن، لكنها ما زالت محفوظة للمراجعة أو الاستئناف.'
+    : 'The article does not hold the lane now, but remains available for review or resumption.';
+};
+
 const getFocusStageDetail = (
   focus: NonNullable<ContentWritingAutomationOverview['focus']>,
   isArabic: boolean,
 ): string | null => {
   const auditProgress = `${focus.completedAuditCount}/${focus.requiredAuditCount}`;
-  const prerequisiteLabels: Record<string, [string, string]> = {
-    draft_status: ['حالة المقالة يجب أن تكون مسودة', 'the article must be a draft'],
-    article_title: ['عنوان صالح للمقالة', 'a valid article title'],
-    editor_text: ['نص المقالة داخل المحرر', 'article text in the editor'],
-    primary_keyword: ['الكلمة المفتاحية الأساسية', 'the primary keyword'],
-    goal_context: ['بيانات الهدف ونوع الصفحة', 'the goal and page-type details'],
-    company_name: ['اسم الجهة أو الشركة', 'the company name'],
-    competitor_content_or_url: ['نص أو رابط منافس صالح', 'valid competitor text or URL'],
-  };
-  const missing = focus.missingPrerequisites
-    .map(code => prerequisiteLabels[code]?.[isArabic ? 0 : 1] || code)
-    .join(isArabic ? '، ' : ', ');
+  const missing = getFocusPrerequisiteLabels(focus.missingPrerequisites, isArabic);
   const statusLabels: Record<string, [string, string]> = {
     running: ['يعمل الآن', 'is running now'],
     queued: ['مجدول وبانتظار العامل', 'is queued for a worker'],
@@ -1026,7 +1046,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
         {overview?.focus && (
           <div
             data-automatic-article-focus="true"
-            className={`mt-2 rounded-lg border px-3 py-2.5 ${overview.focus.state === 'needs_attention'
+            className={`mt-2 rounded-lg border px-3 py-2.5 ${overview.focus.articleId && overview.focus.state === 'needs_attention'
               ? 'border-red-200 bg-red-50/70 dark:border-red-900/60 dark:bg-red-900/10'
               : overview.focus.articleId
                 ? 'border-blue-200 bg-blue-50/70 dark:border-blue-900/60 dark:bg-blue-900/10'
@@ -1036,21 +1056,27 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
               <div className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5 text-[11px] font-black text-gray-800 dark:text-gray-100">
                   <Workflow size={13} className="shrink-0 text-blue-600 dark:text-blue-300" />
-                  {isArabic ? 'أولوية إنهاء المقالة الحالية' : 'Finish-current-article priority'}
+                  {overview.focus.articleId
+                    ? (isArabic ? 'أولوية إنهاء المقالة الحالية' : 'Finish-current-article priority')
+                    : (isArabic ? 'مسار الأتمتة متاح' : 'Automation lane available')}
                 </span>
                 <span className="mt-1 block text-[9px] font-semibold leading-4 text-gray-500 dark:text-gray-400">
-                  {isArabic
-                    ? 'لا تبدأ مقالة تلقائية جديدة حتى تصبح الحالية جاهزة، أو تُنقل إلى مراجعة يدوية بسبب مانع دائم.'
-                    : 'No new automatic article starts until the current one is ready or moved to manual review for a permanent blocker.'}
+                  {overview.focus.articleId
+                    ? (isArabic
+                      ? 'لا تبدأ مقالة تلقائية جديدة حتى تصبح الحالية جاهزة، أو تُنقل إلى مراجعة يدوية بسبب مانع دائم.'
+                      : 'No new automatic article starts until the current one is ready or moved to manual review for a permanent blocker.')
+                    : (isArabic
+                      ? 'لا توجد مقالة حاجزة للمسار الآن؛ يمكن للمحرك اختيار أي مهمة مؤهلة.'
+                      : 'No article currently holds the lane; the engine may select any eligible task.')}
                 </span>
               </div>
-              <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${overview.focus.state === 'needs_attention'
+              <span className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${overview.focus.articleId && overview.focus.state === 'needs_attention'
                 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-200'
                 : overview.focus.articleId
                   ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200'
                   : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200'}`}
               >
-                {getFocusStateLabel(overview.focus.state, isArabic)}
+                {getFocusStateLabel(overview.focus.articleId ? overview.focus.state : 'idle', isArabic)}
               </span>
             </div>
 
@@ -1063,19 +1089,10 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                 <ExternalLink size={11} className="shrink-0" />
                 <span className="truncate">{overview.focus.articleTitle || overview.focus.articleId}</span>
               </button>
-            ) : overview.focus.state !== 'idle' && !overview.focus.articleVisible ? (
+            ) : overview.focus.articleId && !overview.focus.articleVisible ? (
               <span className="mt-2 block text-[10px] font-bold text-gray-600 dark:text-gray-300">
                 {isArabic ? 'توجد مقالة أخرى في مسار النظام ولا تملك صلاحية عرضها.' : 'Another system article owns the lane and is not visible to your account.'}
               </span>
-            ) : overview.focus.canResume && overview.focus.lastArticleId ? (
-              <button
-                type="button"
-                onClick={() => navigateToAppPath(buildEditorArticlePath(overview.focus!.lastArticleId!))}
-                className="mt-2 flex max-w-full items-center gap-1 text-start text-[11px] font-black text-red-700 hover:underline dark:text-red-300"
-              >
-                <ExternalLink size={11} className="shrink-0" />
-                <span className="truncate">{overview.focus.lastArticleTitle || overview.focus.lastArticleId}</span>
-              </button>
             ) : (
               <span className={`mt-2 block text-[10px] font-bold ${hasRunnableWritingTask
                 ? 'text-emerald-700 dark:text-emerald-300'
@@ -1090,7 +1107,53 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
               </span>
             )}
 
-            {(overview.focus.articleId || overview.focus.canResume) && overview.focus.articleVisible && (
+            {!overview.focus.articleId
+              && overview.focus.reviewArticleId
+              && overview.focus.articleVisible && (
+              <div
+                data-released-focus-review="true"
+                className="mt-2 rounded-md border border-red-200 bg-white/80 px-2.5 py-2 dark:border-red-900/60 dark:bg-gray-950/30"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="block text-[10px] font-black text-red-700 dark:text-red-300">
+                      {isArabic ? 'آخر مقالة تحتاج مراجعة' : 'Last article needing review'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => navigateToAppPath(buildEditorArticlePath(overview.focus!.reviewArticleId!))}
+                      className="mt-1 flex max-w-full items-center gap-1 text-start text-[11px] font-black text-blue-700 hover:underline dark:text-blue-300"
+                    >
+                      <ExternalLink size={11} className="shrink-0" />
+                      <span className="truncate">
+                        {overview.focus.reviewArticleTitle || overview.focus.reviewArticleId}
+                      </span>
+                    </button>
+                  </div>
+                  <span className="rounded-full bg-emerald-100 px-2 py-1 text-[8px] font-black text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200">
+                    {isArabic ? 'لا تحجز المسار' : 'Lane released'}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-[9px] font-bold leading-4 text-red-700 dark:text-red-200">
+                  {getReleasedFocusReviewDetail(overview.focus, isArabic)}
+                </p>
+                {overview.focus.reviewNextRequiredStage && (
+                  <span className="mt-1 block text-[9px] font-bold text-gray-600 dark:text-gray-300">
+                    {isArabic ? 'المرحلة التالية بعد التصحيح:' : 'Next stage after correction:'}{' '}
+                    {getFocusStageLabel(overview.focus.reviewNextRequiredStage, isArabic)}
+                  </span>
+                )}
+                {overview.focus.reviewReleasedAt
+                  && Number.isFinite(Date.parse(overview.focus.reviewReleasedAt)) && (
+                  <span className="mt-1 block text-[8px] font-semibold text-gray-500 dark:text-gray-400">
+                    {isArabic ? 'حُرر المسار في:' : 'Lane released at:'}{' '}
+                    {new Date(overview.focus.reviewReleasedAt).toLocaleString(isArabic ? 'ar' : 'en')}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {overview.focus.articleId && overview.focus.articleVisible && (
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] font-bold text-gray-500 dark:text-gray-400">
                 <span>{isArabic ? 'المرحلة:' : 'Stage:'} {getFocusStageLabel(overview.focus.currentStage, isArabic)}</span>
                 {overview.focus.attemptCount > 0 && (
@@ -1206,12 +1269,13 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
                 )}
               </div>
             )}
-            {overview.focus.lastError && overview.focus.articleVisible && (
+            {overview.focus.articleId && overview.focus.lastError && overview.focus.articleVisible && (
               <span className="mt-1.5 line-clamp-2 block text-[9px] font-bold text-red-600 dark:text-red-300">
                 {overview.focus.lastError}
               </span>
             )}
-            {isAdmin && (overview.focus.articleId || overview.focus.canResume) && (
+            {isAdmin && (overview.focus.articleId
+              || (overview.focus.canResume && overview.focus.reviewMissingPrerequisites.length === 0)) && (
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {overview.focus.articleId ? (
                   <button
