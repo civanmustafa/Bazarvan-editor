@@ -255,6 +255,7 @@ const assertAutomaticPreparationStageAllowed = async (
   stage?: 'discovery' | 'extraction',
 ): Promise<void> => {
   if (job.origin !== 'auto') return;
+  if (job.input_snapshot?.automationOverrideDisposition === 'finish_current') return;
   // An explicit writing request may adopt a preparation that was queued by
   // automation. Respect that persisted manual intent and its requesting actor.
   const currentIntent = await readCurrentPreparationIntent(job.id);

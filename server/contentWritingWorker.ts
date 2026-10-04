@@ -8,6 +8,7 @@ import {
 import { executeStructuredContentWritingWorkflow } from './contentWritingWorkflow';
 import {
   claimNextContentWritingSession,
+  contentWritingSessionMayFinishCurrentRun,
   completeContentWritingSession,
   applyAutomaticContentWritingSession,
   failContentWritingSession,
@@ -239,7 +240,9 @@ const executeClaimedSession = async (
   };
 
   try {
-    if (session.context_snapshot?.triggerSource === 'automatic_ready') {
+    if (session.context_snapshot?.triggerSource === 'automatic_ready'
+        && session.context_snapshot?.automationOverrideDisposition !== 'finish_current'
+        && !(await contentWritingSessionMayFinishCurrentRun(session.id))) {
       try {
         await assertAutomaticContentWritingAllowed(session.article_id, session.created_by);
       } catch (error) {

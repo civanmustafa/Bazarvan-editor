@@ -85,16 +85,26 @@ export const automaticJobAllowedByPolicy = (
   }
 };
 
+export const automaticJobMayFinishCurrentRun = (
+  job: Pick<ExternalAnalysisJob, 'origin' | 'input_snapshot'>,
+): boolean => job.origin === 'auto'
+  && job.input_snapshot?.automationOverrideDisposition === 'finish_current';
+
 /** Preserve explicit manual promotions; all other automatic work uses the immutable creator. */
 export const assertAutomaticArticlePolicy = async (job: ExternalAnalysisJob): Promise<void> => {
   if (job.origin !== 'auto') return;
+  if (automaticJobMayFinishCurrentRun(job)) return;
   const { data, error } = await getExternalAnalysisSupabaseAdmin()
-    .from('ai_external_analysis_jobs').select('origin,requested_by').eq('id', job.id).maybeSingle();
+    .from('ai_external_analysis_jobs').select('origin,requested_by,input_snapshot').eq('id', job.id).maybeSingle();
   if (error) throw error;
   if (data?.origin === 'manual') {
     job.origin = 'manual';
     job.requested_by = data.requested_by;
     return;
+  }
+  if (data?.input_snapshot && typeof data.input_snapshot === 'object' && !Array.isArray(data.input_snapshot)) {
+    job.input_snapshot = data.input_snapshot as Record<string, unknown>;
+    if (automaticJobMayFinishCurrentRun(job)) return;
   }
   const policy = await readArticleAutomationPolicy(job.article_id);
   if (!automaticJobAllowedByPolicy(job, policy)) {

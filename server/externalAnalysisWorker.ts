@@ -19,6 +19,7 @@ import {
   completeExternalAnalysisJob,
   deferExternalAnalysisJobForPrerequisite,
   finalizeExternalAnalysisJobCancel,
+  restartExternalAnalysisJobAfterPolicyChange,
   heartbeatExternalAnalysisJob,
   getExternalAnalysisSupabaseAdmin,
   recoverStaleExternalAnalysisJobs,
@@ -273,7 +274,14 @@ const executeClaimedJob = async (
       result: execution.result,
       progress: execution.progress,
     });
-    if (completed.status === 'cancelled') {
+    if (completed.status === 'cancelled'
+        && completed.last_error_code === 'article_automation_policy_refresh') {
+      await restartExternalAnalysisJobAfterPolicyChange({
+        jobId: job.id,
+        workerId: slotWorkerId,
+      });
+      console.log(`[external-analysis-worker] Requeued job ${job.id} (${job.job_type}) after article policy refresh.`);
+    } else if (completed.status === 'cancelled') {
       console.log(`[external-analysis-worker] Cancelled job ${job.id} (${job.job_type}).`);
     } else {
       console.log(`[external-analysis-worker] Completed job ${job.id} (${job.job_type}).`);
@@ -293,13 +301,21 @@ const executeClaimedJob = async (
         : null;
     if (cancellation) {
       try {
-        await finalizeExternalAnalysisJobCancel({
-          jobId: job.id,
-          workerId: slotWorkerId,
-          errorCode: cancellation.code,
-          errorMessage: cancellation.message,
-        });
-        console.log(`[external-analysis-worker] Cancelled job ${job.id} (${job.job_type}).`);
+        if (cancellation.code === 'article_automation_policy_refresh') {
+          await restartExternalAnalysisJobAfterPolicyChange({
+            jobId: job.id,
+            workerId: slotWorkerId,
+          });
+          console.log(`[external-analysis-worker] Requeued job ${job.id} (${job.job_type}) after article policy refresh.`);
+        } else {
+          await finalizeExternalAnalysisJobCancel({
+            jobId: job.id,
+            workerId: slotWorkerId,
+            errorCode: cancellation.code,
+            errorMessage: cancellation.message,
+          });
+          console.log(`[external-analysis-worker] Cancelled job ${job.id} (${job.job_type}).`);
+        }
       } catch (cancelError) {
         logThrottledError(`Could not finalize cancellation for job ${job.id}`, cancelError);
       }

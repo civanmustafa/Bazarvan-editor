@@ -61,6 +61,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
 
+const finishesCurrentRunAfterOverride = (context: ExternalAnalysisExecutionContext): boolean => (
+  context.job.origin === 'auto'
+  && context.job.input_snapshot?.automationOverrideDisposition === 'finish_current'
+);
+
 const toTrimmedString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
 );
@@ -300,6 +305,7 @@ const applySemanticTerms = async (options: {
 
   const latestKeywords = normalizeKeywords(latest.article.keywords);
   const latestAutomationSettings = options.context.job.origin === 'auto'
+    && !finishesCurrentRunAfterOverride(options.context)
     ? await readArticleAutomationPolicy(options.context.job.article_id)
     : null;
   const targets = getRequestedTargetState(
@@ -401,6 +407,7 @@ const executeExternalSemanticAnalysis = async (
 
   const articleInput = toArticleInput(initial.article);
   const automationSettings = context.job.origin === 'auto'
+    && !finishesCurrentRunAfterOverride(context)
     ? await readArticleAutomationPolicy(context.job.article_id)
     : null;
   let initialTargets = getRequestedTargetState(context, articleInput.keywords, automationSettings);
@@ -509,7 +516,9 @@ const executeExternalSemanticAnalysis = async (
       const current = getRequestedTargetState(
         context,
         normalizeKeywords(latestBeforeRepair.article.keywords),
-        await readArticleAutomationPolicy(context.job.article_id),
+        finishesCurrentRunAfterOverride(context)
+          ? null
+          : await readArticleAutomationPolicy(context.job.article_id),
       );
       initialTargets = {
         needsSecondaries: initialTargets.needsSecondaries && current.needsSecondaries,

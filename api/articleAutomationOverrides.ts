@@ -1,5 +1,6 @@
 import {
   ARTICLE_AUTOMATION_CAPABILITIES,
+  isArticleAutomationRunningBehavior,
   isArticleWritingMode,
   normalizeArticleAutomationOverrides,
 } from '../constants/articleAutomationOverrides';
@@ -63,22 +64,29 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
   await requireArticleWriteAccess(getExternalAnalysisSupabaseAdmin(), articleId, principal.userId);
 
   let overrides = await readArticleAutomationOverrides(articleId);
+  let impact;
   if (req.method === 'PUT') {
     if (!isRecord(body)
-      || Object.keys(body).some(key => !['articleId', 'disabledCapabilities', 'writingMode', 'excludedExternalCommandIds', 'reason'].includes(key))
+      || Object.keys(body).some(key => !['articleId', 'disabledCapabilities', 'writingMode', 'excludedExternalCommandIds', 'reason', 'runningBehavior'].includes(key))
       || !Array.isArray(body.disabledCapabilities)
       || body.disabledCapabilities.some(value => typeof value !== 'string' || !CAPABILITY_SET.has(value))
       || !isArticleWritingMode(body.writingMode)
       || !Array.isArray(body.excludedExternalCommandIds)
       || body.excludedExternalCommandIds.some(value => typeof value !== 'string' || value.length > 240)
-      || (body.reason !== undefined && typeof body.reason !== 'string')) {
+      || (body.reason !== undefined && typeof body.reason !== 'string')
+      || (body.runningBehavior !== undefined && !isArticleAutomationRunningBehavior(body.runningBehavior))) {
       throw new ApiSecurityError('أرسل استثناءات المقالة بصيغتها الصحيحة فقط.', 400);
     }
-    overrides = await saveArticleAutomationOverrides({
+    const saved = await saveArticleAutomationOverrides({
       articleId,
       userId: principal.userId,
       overrides: normalizeArticleAutomationOverrides(body),
+      runningBehavior: isArticleAutomationRunningBehavior(body.runningBehavior)
+        ? body.runningBehavior
+        : 'stop',
     });
+    overrides = saved.overrides;
+    impact = saved.impact;
   }
   return {
     status: 200,
@@ -86,6 +94,7 @@ const handleRequest = async (req: any): Promise<ApiResult> => {
       ok: true,
       articleId,
       overrides,
+      impact,
       effectivePolicy: await readArticleAutomationPolicy(articleId),
     },
   };

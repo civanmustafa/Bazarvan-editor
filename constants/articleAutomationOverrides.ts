@@ -13,6 +13,21 @@ export const ARTICLE_AUTOMATION_CAPABILITIES = [
 
 export type ArticleAutomationCapability = typeof ARTICLE_AUTOMATION_CAPABILITIES[number];
 export type ArticleWritingMode = 'strict' | 'available_inputs' | 'manual_only';
+export type ArticleAutomationRunningBehavior = 'stop' | 'finish_current';
+
+export type ArticleAutomationOverrideImpact = {
+  queuedCancelled: number;
+  runningCancellationRequested: number;
+  runningAllowedToFinish: number;
+  bundledRestartRequested: number;
+};
+
+export const EMPTY_ARTICLE_AUTOMATION_OVERRIDE_IMPACT: ArticleAutomationOverrideImpact = {
+  queuedCancelled: 0,
+  runningCancellationRequested: 0,
+  runningAllowedToFinish: 0,
+  bundledRestartRequested: 0,
+};
 
 export type ArticleAutomationOverrides = {
   schemaVersion: number;
@@ -43,6 +58,27 @@ const CAPABILITY_SET = new Set<string>(ARTICLE_AUTOMATION_CAPABILITIES);
 export const isArticleWritingMode = (value: unknown): value is ArticleWritingMode => (
   value === 'strict' || value === 'available_inputs' || value === 'manual_only'
 );
+
+export const isArticleAutomationRunningBehavior = (
+  value: unknown,
+): value is ArticleAutomationRunningBehavior => value === 'stop' || value === 'finish_current';
+
+export const normalizeArticleAutomationOverrideImpact = (
+  value: unknown,
+): ArticleAutomationOverrideImpact => {
+  const source = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const count = (key: keyof ArticleAutomationOverrideImpact): number => (
+    Math.max(0, Math.floor(Number(source[key]) || 0))
+  );
+  return {
+    queuedCancelled: count('queuedCancelled'),
+    runningCancellationRequested: count('runningCancellationRequested'),
+    runningAllowedToFinish: count('runningAllowedToFinish'),
+    bundledRestartRequested: count('bundledRestartRequested'),
+  };
+};
 
 export const normalizeArticleAutomationOverrides = (
   value: unknown,

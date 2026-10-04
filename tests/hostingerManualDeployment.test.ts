@@ -46,9 +46,9 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-155/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-155/);
-  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=155/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-156/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-156/);
+  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=156/);
   assert.match(deployScript, /verify-project-schema\.sh/);
   assert.match(verifyScript, /get_visible_automation_task_inventory_v20/);
   assert.match(verifyScript, /INDEPENDENT_COMPETITOR_DISCOVERY/);

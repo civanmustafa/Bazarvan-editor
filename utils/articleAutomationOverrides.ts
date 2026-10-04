@@ -1,17 +1,22 @@
 import {
   normalizeArticleAutomationOverrides,
+  normalizeArticleAutomationOverrideImpact,
   type ArticleAutomationOverrides,
+  type ArticleAutomationOverrideImpact,
+  type ArticleAutomationRunningBehavior,
 } from '../constants/articleAutomationOverrides';
 import { getSupabaseClient } from './supabaseClient';
 
 type ArticleAutomationOverridesResponse = {
   overrides: ArticleAutomationOverrides;
   effectivePolicy: Record<string, unknown>;
+  impact: ArticleAutomationOverrideImpact;
 };
 
 const request = async (
   articleId: string,
   overrides?: ArticleAutomationOverrides,
+  runningBehavior: ArticleAutomationRunningBehavior = 'stop',
 ): Promise<ArticleAutomationOverridesResponse> => {
   const { data, error } = await getSupabaseClient().auth.getSession();
   if (error || !data.session?.access_token) throw error || new Error('يجب تسجيل الدخول.');
@@ -34,6 +39,7 @@ const request = async (
           writingMode: normalized.writingMode,
           excludedExternalCommandIds: normalized.excludedExternalCommandIds,
           reason: normalized.reason,
+          runningBehavior,
         });
       })() : undefined,
     },
@@ -49,6 +55,7 @@ const request = async (
     effectivePolicy: payload?.effectivePolicy && typeof payload.effectivePolicy === 'object'
       ? payload.effectivePolicy as Record<string, unknown>
       : {},
+    impact: normalizeArticleAutomationOverrideImpact(payload?.impact),
   };
 };
 
@@ -56,4 +63,5 @@ export const loadArticleAutomationOverrides = (articleId: string) => request(art
 export const updateArticleAutomationOverrides = (
   articleId: string,
   overrides: ArticleAutomationOverrides,
-) => request(articleId, overrides);
+  runningBehavior: ArticleAutomationRunningBehavior = 'stop',
+) => request(articleId, overrides, runningBehavior);

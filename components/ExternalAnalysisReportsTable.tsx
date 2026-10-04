@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
+  CircleStop,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -174,7 +175,8 @@ const ExternalAnalysisReportsTable: React.FC<{
   const displayedJobs = jobs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const completedCount = jobs.filter(job => job.status === 'completed').length;
   const retryCount = jobs.filter(job => job.status === 'retry_scheduled').length;
-  const failedCount = jobs.filter(job => ['failed', 'blocked', 'cancelled'].includes(job.status)).length;
+  const failedCount = jobs.filter(job => ['failed', 'blocked'].includes(job.status)).length;
+  const cancelledCount = jobs.filter(job => job.status === 'cancelled').length;
 
   useEffect(() => {
     setPage(1);
@@ -337,7 +339,8 @@ const ExternalAnalysisReportsTable: React.FC<{
         <span>المهام: <strong className="text-gray-800 dark:text-gray-100">{jobs.length}</strong></span>
         <span className="text-emerald-600 dark:text-emerald-300">ناجحة: {completedCount}</span>
         <span className="text-amber-600 dark:text-amber-300">بانتظار إعادة المحاولة: {retryCount}</span>
-        <span className="text-red-600 dark:text-red-300">فاشلة أو ملغاة: {failedCount}</span>
+        <span className="text-red-600 dark:text-red-300">فاشلة: {failedCount}</span>
+        <span className="text-gray-500 dark:text-gray-300">موقوفة وليست فشلًا: {cancelledCount}</span>
       </div>
 
       {error && (
@@ -409,7 +412,9 @@ const ExternalAnalysisReportsTable: React.FC<{
                           ? <LoaderCircle size={13} className="animate-spin" />
                           : job.status === 'retry_scheduled'
                             ? <RotateCcw size={13} />
-                            : ['failed', 'blocked', 'cancelled'].includes(job.status)
+                            : job.status === 'cancelled'
+                              ? <CircleStop size={13} />
+                              : ['failed', 'blocked'].includes(job.status)
                               ? <XCircle size={13} />
                               : <Clock3 size={13} />}
                       {statusLabel(job.status, locale)}

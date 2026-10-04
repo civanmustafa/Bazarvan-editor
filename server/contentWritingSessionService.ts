@@ -57,6 +57,20 @@ export type ContentWritingSession = {
 
 export type ContentWritingSessionSummary = Omit<ContentWritingSession, 'input_hash' | 'result_text'>;
 
+export const contentWritingSessionMayFinishCurrentRun = async (
+  sessionId: string,
+): Promise<boolean> => {
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('content_writing_sessions')
+    .select('context_snapshot')
+    .eq('id', sessionId)
+    .maybeSingle();
+  if (error) throw error;
+  const snapshot = data?.context_snapshot;
+  return Boolean(snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
+    && (snapshot as Record<string, unknown>).automationOverrideDisposition === 'finish_current');
+};
+
 export type ContentWritingMessage = {
   id: string;
   session_id: string;

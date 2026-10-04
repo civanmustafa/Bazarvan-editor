@@ -58,6 +58,7 @@ import { readPromptRegistrySettings } from './promptRegistrySettings';
 import {
   createCompletedExternalContentWritingSession,
   createContentWritingSession,
+  contentWritingSessionMayFinishCurrentRun,
   type ContentWritingMessage,
   type ContentWritingProvider,
   type ContentWritingSession,
@@ -748,7 +749,9 @@ export const executeContentWritingTurn = async (options: {
   signal?: AbortSignal;
   onProgress?: (progress: AiExecutionProgress) => void;
 }): Promise<ContentWritingExecutionResult> => {
-  if (options.session.context_snapshot?.triggerSource === 'automatic_ready') {
+  if (options.session.context_snapshot?.triggerSource === 'automatic_ready'
+      && options.session.context_snapshot?.automationOverrideDisposition !== 'finish_current'
+      && !(await contentWritingSessionMayFinishCurrentRun(options.session.id))) {
     // Each writing stage is a separate paid request. Let a response already in
     // flight be persisted, but never start the next stage using a stale policy.
     const policy = await readArticleAutomationPolicy(options.session.article_id);

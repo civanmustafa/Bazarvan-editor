@@ -6,7 +6,7 @@ import {
   getExternalAnalysisSupabaseAdmin,
   type ExternalAnalysisJob,
 } from './externalAnalysisQueue';
-import { readArticleAutomationPolicy } from './articleAutomationPolicy';
+import { automaticJobMayFinishCurrentRun, readArticleAutomationPolicy } from './articleAutomationPolicy';
 
 const ACTIVE_SEMANTIC_STATUSES = [
   'waiting_for_prerequisites',
@@ -49,9 +49,10 @@ const readCurrentEngineeringJobOrigin = async (
  * an automatic task immediately before the administrator disabled it.
  */
 export const assertAutomaticReadyEngineeringCommandsAllowed = async (
-  job: Pick<ExternalAnalysisJob, 'id' | 'origin' | 'article_id' | 'command_id'>,
+  job: Pick<ExternalAnalysisJob, 'id' | 'origin' | 'article_id' | 'command_id' | 'input_snapshot'>,
 ): Promise<void> => {
   if (job.origin !== 'auto') return;
+  if (automaticJobMayFinishCurrentRun(job)) return;
 
   const currentOrigin = await readCurrentEngineeringJobOrigin(job.id);
   if (currentOrigin === 'manual') {
@@ -81,9 +82,10 @@ export const assertAutomaticReadyEngineeringCommandsAllowed = async (
  * closes the small commit race between a settings update and a queued worker.
  */
 export const assertAutomaticCompetitorResearchAllowed = async (
-  job: Pick<ExternalAnalysisJob, 'article_id' | 'job_type' | 'origin'>,
+  job: Pick<ExternalAnalysisJob, 'article_id' | 'job_type' | 'origin' | 'input_snapshot'>,
 ): Promise<void> => {
   if (job.origin !== 'auto') return;
+  if (automaticJobMayFinishCurrentRun(job)) return;
 
   const settings = await readArticleAutomationPolicy(job.article_id);
   if ((job.job_type === 'competitor_discovery' || settings.scope === 'legacy') && !settings.autoDiscoverCompetitors) {

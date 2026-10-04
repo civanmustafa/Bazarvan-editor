@@ -196,6 +196,19 @@ export const finalizeExternalAnalysisJobCancel = async (options: {
   return job;
 };
 
+export const restartExternalAnalysisJobAfterPolicyChange = async (options: {
+  jobId: string;
+  workerId: string;
+}): Promise<ExternalAnalysisJob> => {
+  const data = await callQueueRpc<unknown>('restart_external_analysis_job_after_policy_change', {
+    p_job_id: options.jobId,
+    p_worker_id: options.workerId,
+  });
+  const job = firstJob(data);
+  if (!job) throw new Error('Policy-refresh restart RPC returned no external analysis job.');
+  return job;
+};
+
 export const blockExternalAnalysisJob = async (options: {
   jobId: string;
   workerId: string;

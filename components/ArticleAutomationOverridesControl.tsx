@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Loader2, Settings2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Settings2, X } from 'lucide-react';
 import {
   ARTICLE_AUTOMATION_CAPABILITIES,
   ARTICLE_AUTOMATION_OVERRIDE_DEFAULTS,
@@ -7,6 +7,8 @@ import {
   countArticleAutomationExceptions,
   type ArticleAutomationCapability,
   type ArticleAutomationOverrides,
+  type ArticleAutomationOverrideImpact,
+  type ArticleAutomationRunningBehavior,
   type ArticleWritingMode,
 } from '../constants/articleAutomationOverrides';
 import {
@@ -86,11 +88,20 @@ const ArticleAutomationOverridesControl: React.FC<{
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
+  const [saveImpact, setSaveImpact] = useState<ArticleAutomationOverrideImpact | null>(null);
+  const [runningBehavior, setRunningBehavior] = useState<ArticleAutomationRunningBehavior>('stop');
   const [overrides, setOverrides] = useState<ArticleAutomationOverrides | null>(null);
   const exceptionCount = useMemo(
     () => overrides ? countArticleAutomationExceptions(overrides) : 0,
     [overrides],
   );
+
+  useEffect(() => {
+    setOverrides(null);
+    setSaveImpact(null);
+    setRunningBehavior('stop');
+    setError('');
+  }, [articleId]);
 
   useEffect(() => {
     if (!isOpen || overrides || isLoading) return;
@@ -110,6 +121,7 @@ const ArticleAutomationOverridesControl: React.FC<{
   };
 
   const toggleCapability = (capability: ArticleAutomationCapability) => {
+    setSaveImpact(null);
     setOverrides(current => {
       const value = current || cloneDefaults();
       const disabled = value.disabledCapabilities.includes(capability)
@@ -120,6 +132,7 @@ const ArticleAutomationOverridesControl: React.FC<{
   };
 
   const toggleCommand = (commandId: string) => {
+    setSaveImpact(null);
     setOverrides(current => {
       const value = current || cloneDefaults();
       const excluded = value.excludedExternalCommandIds.includes(commandId)
@@ -134,10 +147,10 @@ const ArticleAutomationOverridesControl: React.FC<{
     setIsSaving(true);
     setError('');
     try {
-      const result = await updateArticleAutomationOverrides(articleId, overrides);
+      const result = await updateArticleAutomationOverrides(articleId, overrides, runningBehavior);
       setOverrides(result.overrides);
+      setSaveImpact(result.impact);
       await onSaved?.();
-      setIsOpen(false);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'تعذر حفظ الاستثناءات.');
     } finally {
@@ -219,7 +232,7 @@ const ArticleAutomationOverridesControl: React.FC<{
                             name={`article-writing-mode-${articleId}`}
                             value={mode.value}
                             checked={overrides.writingMode === mode.value}
-                            onChange={() => setOverrides({ ...overrides, writingMode: mode.value })}
+                            onChange={() => { setOverrides({ ...overrides, writingMode: mode.value }); setSaveImpact(null); }}
                             className="text-[#d4af37] focus:ring-[#d4af37]"
                           />
                           {mode.title}
@@ -286,12 +299,65 @@ const ArticleAutomationOverridesControl: React.FC<{
                   <span className="mb-1 block text-sm font-black text-gray-800 dark:text-gray-100">سبب الاستثناء (اختياري)</span>
                   <textarea
                     value={overrides.reason}
-                    onChange={event => setOverrides({ ...overrides, reason: event.target.value.slice(0, 1_000) })}
+                    onChange={event => { setOverrides({ ...overrides, reason: event.target.value.slice(0, 1_000) }); setSaveImpact(null); }}
                     rows={3}
                     placeholder="مثال: هذه المقالة مرجعية وستُكتب يدويًا دون مقارنة منافسين."
                     className="w-full rounded-xl border border-gray-300 bg-white p-3 text-sm text-gray-800 focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37] dark:border-[#444] dark:bg-[#202020] dark:text-gray-100"
                   />
                 </label>
+
+                <section>
+                  <h4 className="mb-2 text-sm font-black text-gray-800 dark:text-gray-100">إذا كانت مرحلة مستثناة قيد التنفيذ الآن</h4>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <label className={`cursor-pointer rounded-xl border p-3 transition ${runningBehavior === 'stop'
+                      ? 'border-red-300 bg-red-50/70 dark:border-red-500/40 dark:bg-red-500/10'
+                      : 'border-gray-200 dark:border-[#3c3c3c]'
+                    }`}>
+                      <span className="flex items-center gap-2 text-xs font-black text-gray-800 dark:text-gray-100">
+                        <input
+                          type="radio"
+                          name={`article-running-behavior-${articleId}`}
+                          checked={runningBehavior === 'stop'}
+                          onChange={() => { setRunningBehavior('stop'); setSaveImpact(null); }}
+                          className="text-red-600 focus:ring-red-500"
+                        />
+                        إيقافها وتطبيق الاستثناء الآن (موصى به)
+                      </span>
+                      <span className="mt-1 block text-[11px] leading-5 text-gray-500 dark:text-gray-400">
+                        تُلغى المهام المنتظرة فورًا، ويُطلب إيقاف الجاري. المهمة المجمعة تُعاد من السجل نفسه بالأجزاء المسموحة فقط.
+                      </span>
+                    </label>
+                    <label className={`cursor-pointer rounded-xl border p-3 transition ${runningBehavior === 'finish_current'
+                      ? 'border-blue-300 bg-blue-50/70 dark:border-blue-500/40 dark:bg-blue-500/10'
+                      : 'border-gray-200 dark:border-[#3c3c3c]'
+                    }`}>
+                      <span className="flex items-center gap-2 text-xs font-black text-gray-800 dark:text-gray-100">
+                        <input
+                          type="radio"
+                          name={`article-running-behavior-${articleId}`}
+                          checked={runningBehavior === 'finish_current'}
+                          onChange={() => { setRunningBehavior('finish_current'); setSaveImpact(null); }}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        إكمال الجاري ثم تطبيق الاستثناء
+                      </span>
+                      <span className="mt-1 block text-[11px] leading-5 text-gray-500 dark:text-gray-400">
+                        يُسمح فقط للتشغيل الذي بدأ فعليًا بالاكتمال؛ تُلغى المهام المنتظرة ولا تبدأ مهمة جديدة للمرحلة المستثناة.
+                      </span>
+                    </label>
+                  </div>
+                </section>
+
+                {saveImpact && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-6 text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200" role="status">
+                    <div className="flex items-center gap-2 font-black"><CheckCircle2 size={16} /> حُفظت الاستثناءات وتحدّث الطابور.</div>
+                    <div className="mt-1">
+                      أُلغيت {saveImpact.queuedCancelled} مهمة منتظرة، وطُلب إيقاف {saveImpact.runningCancellationRequested} مهمة جارية،
+                      وسُمح لـ {saveImpact.runningAllowedToFinish} مهمة جارية بالإكمال.
+                      {saveImpact.bundledRestartRequested > 0 && ` ستُعاد ${saveImpact.bundledRestartRequested} مهمة مجمعة من السجل نفسه بالأجزاء المسموحة.`}
+                    </div>
+                  </div>
+                )}
 
                 {error && (
                   <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
@@ -302,7 +368,7 @@ const ArticleAutomationOverridesControl: React.FC<{
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4 dark:border-[#333]">
                   <button
                     type="button"
-                    onClick={() => setOverrides(cloneDefaults())}
+                    onClick={() => { setOverrides(cloneDefaults()); setSaveImpact(null); }}
                     disabled={isSaving}
                     className="rounded-lg border border-gray-300 px-3 py-2 text-xs font-black text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-[#444] dark:text-gray-300 dark:hover:bg-white/5"
                   >

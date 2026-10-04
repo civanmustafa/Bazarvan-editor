@@ -1,7 +1,10 @@
 import {
   ARTICLE_AUTOMATION_OVERRIDE_DEFAULTS,
+  normalizeArticleAutomationOverrideImpact,
   normalizeArticleAutomationOverrides,
+  type ArticleAutomationOverrideImpact,
   type ArticleAutomationOverrides,
+  type ArticleAutomationRunningBehavior,
 } from '../constants/articleAutomationOverrides';
 import { getExternalAnalysisSupabaseAdmin } from './externalAnalysisQueue';
 
@@ -34,10 +37,11 @@ export const saveArticleAutomationOverrides = async (input: {
   articleId: string;
   userId: string;
   overrides: ArticleAutomationOverrides;
-}): Promise<ArticleAutomationOverrides> => {
+  runningBehavior: ArticleAutomationRunningBehavior;
+}): Promise<{ overrides: ArticleAutomationOverrides; impact: ArticleAutomationOverrideImpact }> => {
   const normalized = normalizeArticleAutomationOverrides(input.overrides);
   const { data, error } = await getExternalAnalysisSupabaseAdmin().rpc(
-    'save_article_automation_overrides',
+    'save_article_automation_overrides_v2',
     {
       p_article_id: input.articleId,
       p_updated_by: input.userId,
@@ -45,8 +49,15 @@ export const saveArticleAutomationOverrides = async (input: {
       p_writing_mode: normalized.writingMode,
       p_excluded_external_command_ids: normalized.excludedExternalCommandIds,
       p_reason: normalized.reason || null,
+      p_running_behavior: input.runningBehavior,
     },
   );
   if (error) throw error;
-  return normalizeArticleAutomationOverrides(data);
+  const payload = data && typeof data === 'object' && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {};
+  return {
+    overrides: normalizeArticleAutomationOverrides(payload.overrides || payload),
+    impact: normalizeArticleAutomationOverrideImpact(payload.impact),
+  };
 };
