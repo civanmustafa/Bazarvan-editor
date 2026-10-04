@@ -30,9 +30,10 @@ test('article overrides are opt-in, restrictive, deduplicated, and bounded', () 
 });
 
 test('migration overlays policy, bypasses only competitor gates, and cancels excluded work neutrally', async () => {
-  const migration = await readWorkspaceFile(
-    'supabase/migrations/20261028000000_article_automation_overrides.sql',
-  );
+  const [migration, trashGuardMigration] = await Promise.all([
+    readWorkspaceFile('supabase/migrations/20261028000000_article_automation_overrides.sql'),
+    readWorkspaceFile('supabase/migrations/20261028010000_restore_trashed_article_policy_guard.sql'),
+  ]);
   assert.match(migration, /create table if not exists public\.article_automation_overrides/);
   assert.match(migration, /alter table public\.article_automation_overrides enable row level security/);
   assert.match(migration, /articleWritingMode/);
@@ -41,7 +42,7 @@ test('migration overlays policy, bypasses only competitor gates, and cancels exc
   assert.match(migration, /article_automation_stage_excluded/);
   assert.match(migration, /create or replace function public\.article_automatic_policy_allows/);
   assert.match(migration, /articleOverrideVersion/);
-  assert.match(migration, /public\.article_is_globally_trashed\(p_article_id\)/);
+  assert.match(trashGuardMigration, /public\.article_is_globally_trashed\(p_article_id\)/);
   assert.match(migration, /perform public\.reconcile_automatic_article_focus\(\)/);
   assert.match(migration, /select 23/);
   assert.equal((migration.match(/\$readiness_patch\$/g) || []).length, 2);
