@@ -41,6 +41,7 @@ test('migration overlays policy, bypasses only competitor gates, and cancels exc
   assert.match(migration, /article_automation_stage_excluded/);
   assert.match(migration, /create or replace function public\.article_automatic_policy_allows/);
   assert.match(migration, /articleOverrideVersion/);
+  assert.match(migration, /public\.article_is_globally_trashed\(p_article_id\)/);
   assert.match(migration, /perform public\.reconcile_automatic_article_focus\(\)/);
   assert.match(migration, /select 23/);
   assert.equal((migration.match(/\$readiness_patch\$/g) || []).length, 2);

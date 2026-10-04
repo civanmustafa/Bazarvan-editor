@@ -159,8 +159,15 @@ stable
 security definer
 set search_path = public, pg_temp
 as $$
-declare v_policy jsonb := public.article_automation_policy(p_article_id);
+declare v_policy jsonb;
 begin
+  if p_article_id is null
+     or not exists (select 1 from public.articles where id = p_article_id)
+     or public.article_is_globally_trashed(p_article_id) then
+    return false;
+  end if;
+
+  v_policy := public.article_automation_policy(p_article_id);
   if coalesce((v_policy->>'policyVersion')::integer, 0) = 0
      and coalesce((v_policy->>'articleOverrideVersion')::integer, 0) = 0 then
     return true;
