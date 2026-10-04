@@ -6,7 +6,7 @@ readonly MIGRATIONS_DIR="${1:-/var/www/bazarvan-editor-staging/supabase/migratio
 readonly DB_CONTAINER="${DB_CONTAINER:-supabase-db}"
 readonly DB_NAME="${DB_NAME:-postgres}"
 readonly DB_USER="${DB_USER:-postgres}"
-readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-154}"
+readonly EXPECTED_MIGRATIONS="${EXPECTED_MIGRATIONS:-155}"
 readonly EXPECTED_PUBLIC_TABLES="${EXPECTED_PUBLIC_TABLES:-70}"
 readonly API_URL="http://127.0.0.1:18000"
 readonly ENV_FILE="${STACK_DIR}/.env"
@@ -165,6 +165,7 @@ readonly AUTOMATION_SINGLE_MASTER_SCHEMA="$(sql_scalar "select
   and to_regprocedure('public.resume_satisfied_automatic_prerequisite_jobs(integer)') is not null
   and to_regprocedure('public.release_reclassified_automatic_focus_pauses(integer)') is not null
   and to_regprocedure('public.release_recoverable_automatic_focus_stalls(integer)') is not null
+  and position('post_write_prerequisite_unscheduled' in pg_get_functiondef('public.release_recoverable_automatic_focus_stalls(integer)'::regprocedure)) > 0
   and to_regprocedure('public.get_visible_automation_task_inventory_v20(uuid)') is not null
   and to_regprocedure('public.get_visible_automation_task_inventory_v16(uuid)') is not null
   and to_regprocedure('public.get_visible_automation_task_inventory_v15(uuid)') is not null
@@ -238,7 +239,7 @@ readonly CREATOR_AUTOMATION_COLUMNS="$(sql_scalar "select count(*) from informat
 [[ "${UNIFIED_SEMANTIC_GOOGLE_TARGET_STAMP}" == "t" ]] || fail "Semantic target stamp does not include Google metadata."
 [[ "${READY_STATUS_META_DESCRIPTION_TRIGGER_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description trigger is still active."
 [[ "${READY_STATUS_META_DESCRIPTION_SETTING_RETIRED}" == "t" ]] || fail "Retired ready-status meta-description setting still exists."
-(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 24 )) || fail "Independent competitor-discovery runtime recovery schema is missing."
+(( AUTOMATIC_WRITING_SCHEMA_VERSION >= 25 )) || fail "Circular post-write focus recovery schema is missing."
 [[ "${ARTICLE_AUTOMATION_OVERRIDES}" == "t" ]] || fail "Per-article automation overrides are incomplete."
 [[ "${ARTICLE_AUTOMATION_OVERRIDES_PRIVILEGES}" == "t" ]] || fail "Per-article automation overrides have unsafe browser privileges."
 [[ "${RELEASED_FOCUS_REVIEW_TRUTH}" == "t" ]] || fail "Released focus articles can still masquerade as active lane owners."

@@ -46,13 +46,14 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-154/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-154/);
-  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=154/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-155/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-155/);
+  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=155/);
   assert.match(deployScript, /verify-project-schema\.sh/);
   assert.match(verifyScript, /get_visible_automation_task_inventory_v20/);
   assert.match(verifyScript, /INDEPENDENT_COMPETITOR_DISCOVERY/);
-  assert.match(verifyScript, /AUTOMATIC_WRITING_SCHEMA_VERSION >= 24/);
+  assert.match(verifyScript, /AUTOMATIC_WRITING_SCHEMA_VERSION >= 25/);
+  assert.match(verifyScript, /post_write_prerequisite_unscheduled/);
   assert.match(verifyScript, /independentFromSemanticGeneration/);
   assert.match(verifyScript, /ARTICLE_AUTOMATION_OVERRIDES/);
   assert.match(verifyScript, /ARTICLE_AUTOMATION_OVERRIDES_PRIVILEGES/);
@@ -62,6 +63,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(verifyScript, /get_automatic_article_focus_v19/);
   assert.match(guide, /20261006000000_article_work_readiness_orchestration\.sql/);
   assert.match(guide, /20261007000000_finish_focused_article_first\.sql/);
+  assert.match(guide, /20261030000000_release_scheduled_post_write_focus\.sql/);
   assert.match(guide, /20261008000000_complete_satisfied_competitor_preparation\.sql/);
   assert.match(guide, /20261009000000_unify_automation_master_and_truthful_queue_inventory\.sql/);
   assert.match(guide, /20261010000000_classify_cancelled_writing_inventory\.sql/);

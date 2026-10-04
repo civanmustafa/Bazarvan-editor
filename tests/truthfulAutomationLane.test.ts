@@ -24,6 +24,125 @@ test('temporary focus stalls recover inside the existing single master only', as
   assert.match(migration, /select 14/);
 });
 
+test('scheduled post-write prerequisites release their obsolete review pause', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20261030000000_release_scheduled_post_write_focus.sql',
+  );
+
+  assert.match(migration, /post_write_prerequisite_unscheduled/);
+  assert.match(migration, /blockedBy' = 'automatic_article_focus'/);
+  assert.match(migration, /article_automatic_policy_allows/);
+  assert.match(migration, /release_recoverable_automatic_focus_stalls\(50\)/);
+  assert.match(migration, /select 25;/);
+  assert.doesNotMatch(migration, /terminal_stage_failure/);
+  assert.doesNotMatch(migration, /cron\.schedule|pg_cron|create extension/);
+});
+
+test('post-write focus recovery executes only with a scheduled focus-blocked job', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20261030000000_release_scheduled_post_write_focus.sql',
+  );
+  const db = new PGlite();
+  const articleId = '63000000-0000-4000-8000-000000000001';
+  try {
+    await db.exec(`
+      create role anon; create role authenticated; create role service_role;
+      create table public.articles (
+        id uuid primary key,
+        status text not null
+      );
+      create table public.automatic_article_focus_pauses (
+        article_id uuid primary key,
+        reason text not null,
+        error_code text,
+        error_message text,
+        paused_by uuid,
+        paused_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+      create table public.ai_external_analysis_article_state (
+        article_id uuid primary key,
+        semantic_ready boolean not null default false,
+        competitor_discovery_ready boolean not null default false
+      );
+      create table public.ai_external_analysis_jobs (
+        id uuid primary key default gen_random_uuid(),
+        article_id uuid not null,
+        origin text not null,
+        pipeline_parent_job_id uuid,
+        cancel_requested_at timestamptz,
+        status text not null,
+        progress jsonb not null default '{}'::jsonb,
+        job_type text not null,
+        command_id text
+      );
+      create table public.automatic_article_focus (
+        singleton boolean primary key,
+        article_id uuid,
+        last_article_id uuid,
+        state text,
+        current_stage text,
+        last_release_reason text,
+        released_at timestamptz,
+        next_retry_at timestamptz,
+        last_error_code text,
+        last_error text,
+        last_progress_at timestamptz,
+        updated_at timestamptz not null default now()
+      );
+      create table public.worker_queue_signals (queue_name text primary key);
+      create function public.automatic_content_writing_requirement(uuid)
+        returns jsonb language sql immutable as $$select '{"required":false}'::jsonb$$;
+      create function public.evaluate_content_writing_automation_readiness(uuid)
+        returns jsonb language sql immutable as $$select '{"ready":false}'::jsonb$$;
+      create function public.article_is_globally_trashed(uuid)
+        returns boolean language sql immutable as $$select false$$;
+      create function public.article_automatic_policy_allows(uuid,text,text default null)
+        returns boolean language sql immutable as $$select true$$;
+      create function public.unified_duplicate_cleanup_auto_ready(uuid)
+        returns boolean language sql immutable as $$select false$$;
+      create function public.reconcile_automatic_article_focus()
+        returns jsonb language sql as $$select '{}'::jsonb$$;
+      create function public.content_writing_automation_schema_version()
+        returns integer language sql immutable as $$select 24$$;
+
+      insert into public.articles(id,status)
+      values ('${articleId}','draft');
+      insert into public.automatic_article_focus_pauses(article_id,reason,error_message)
+      values ('${articleId}','post_write_prerequisite_unscheduled','old missing prerequisite');
+      insert into public.ai_external_analysis_article_state(article_id)
+      values ('${articleId}');
+      insert into public.ai_external_analysis_jobs(
+        article_id,origin,status,progress,job_type
+      ) values (
+        '${articleId}','auto','waiting_for_prerequisites',
+        '{"blockedBy":"automatic_article_focus"}'::jsonb,'competitor_extraction'
+      );
+      insert into public.automatic_article_focus(
+        singleton,last_article_id,state
+      ) values (true,'${articleId}','needs_attention');
+    `);
+
+    await db.exec(migration);
+
+    const repaired = (await db.query<{
+      pause_count: number;
+      focus_state: string;
+      version: number;
+    }>(`
+      select
+        (select count(*)::integer from public.automatic_article_focus_pauses) as pause_count,
+        (select state from public.automatic_article_focus where singleton) as focus_state,
+        public.content_writing_automation_schema_version() as version
+    `)).rows[0];
+    assert.equal(repaired.pause_count, 0);
+    assert.equal(repaired.focus_state, 'idle');
+    assert.equal(repaired.version, 25);
+  } finally {
+    await db.close();
+  }
+});
+
 test('the public inventory treats pauses and missing prerequisites truthfully', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20261017000000_truthful_idle_lane_and_stall_recovery.sql',

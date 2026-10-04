@@ -82,7 +82,7 @@ set -a
 source .env.production
 set +a
 
-BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=154 \
+BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=155 \
   bash deploy/hostinger-supabase/apply-project-migrations.sh
 
 npm ci --include=dev
@@ -148,9 +148,11 @@ from (
     and job.last_error_code = 'content_research_automation_changed'
     and job.progress->>'blockedBy' = 'semantic_keywords'
 ) as recoverable;
+
+select public.release_recoverable_automatic_focus_stalls(50);
 SQL
 
-EXPECTED_MIGRATIONS=154 \
+EXPECTED_MIGRATIONS=155 \
   bash deploy/hostinger-supabase/verify-project-schema.sh
 
 wait_for_endpoint() {
