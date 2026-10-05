@@ -1356,6 +1356,9 @@ export const executeStructuredContentWritingWorkflow = async (
       stepCount: definitions.length,
       maxOutputTokens: 8_000,
       articleContextOverride: compactArticleContext,
+      invalidOutputRetryLimit: 1,
+      invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+      responseMimeType: 'application/json',
       processOutput: output => {
         const parsed = parseContentWritingSectionResult(
           output,
@@ -1634,6 +1637,9 @@ export const executeStructuredContentWritingWorkflow = async (
     stepCount: definitions.length,
     maxOutputTokens: 6_000,
     articleContextOverride: compactArticleContext,
+    invalidOutputRetryLimit: 1,
+    invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+    responseMimeType: 'application/json',
     processOutput: output => {
       const audit = parseContentWritingCoverageAudit(output, {
         validIdeaIds: knowledge.items.map(item => item.id),
@@ -1732,6 +1738,9 @@ export const executeStructuredContentWritingWorkflow = async (
       stepCount: definitions.length + coverageAudit.repairs.length,
       maxOutputTokens: 8_000,
       articleContextOverride: compactArticleContext,
+      invalidOutputRetryLimit: 1,
+      invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+      responseMimeType: 'application/json',
       processOutput: output => {
         const parsed = parseContentWritingSectionResult(
           output,
@@ -1909,6 +1918,9 @@ export const executeStructuredContentWritingWorkflow = async (
       stepCount: totalRevisionStepCount,
       maxOutputTokens: 20_000,
       articleContextOverride: buildTargetedRevisionArticleContext(compactArticleContext),
+      invalidOutputRetryLimit: 1,
+      invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+      responseMimeType: 'application/json',
       processOutput: output => {
         const edits = parseContentWritingRevisionEdits(output, revisionOptions.plan);
         const application = applyContentWritingRevisionEdits(revisionDocument, edits);
@@ -2029,6 +2041,9 @@ export const executeStructuredContentWritingWorkflow = async (
     stepCount: totalRevisionStepCount,
     maxOutputTokens: 8_000,
     articleContextOverride: compactArticleContext,
+    invalidOutputRetryLimit: 1,
+    invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+    responseMimeType: 'application/json',
     processOutput: output => {
       const revisionPlan = parseContentWritingRevisionPlan(output, finalReviewDocument);
       return {
@@ -2115,6 +2130,9 @@ export const executeStructuredContentWritingWorkflow = async (
         stepCount: totalRevisionStepCount,
         maxOutputTokens: 8_000,
         articleContextOverride: compactArticleContext,
+        invalidOutputRetryLimit: 1,
+        invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+        responseMimeType: 'application/json',
         processOutput: output => {
           const revisionPlan = parseContentWritingRevisionPlan(output, repairDocument);
           return {
@@ -2219,6 +2237,9 @@ export const executeStructuredContentWritingWorkflow = async (
     stepCount: metaDescriptionDefinition.ordinal,
     maxOutputTokens: 1_200,
     articleContextOverride: compactArticleContext,
+    invalidOutputRetryLimit: 1,
+    invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+    responseMimeType: 'application/json',
     processOutput: output => {
       previousInvalidMetaDescriptionResponse = output;
       const validated = parseValidMetaDescriptionGeneration({

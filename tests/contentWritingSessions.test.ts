@@ -351,6 +351,18 @@ test('content-writing engine owns server-side context assembly and structured pr
     workflow,
     /const faqResult = await runCandidateStage\([\s\S]*?invalidOutputRetryLimit: 1,[\s\S]*?responseMimeType: 'application\/json'/,
   );
+  assert.match(
+    workflow,
+    /const coverageAuditResult = await runStep\([\s\S]*?invalidOutputRetryLimit: 1,[\s\S]*?responseMimeType: 'application\/json'/,
+  );
+  assert.match(
+    workflow,
+    /const finalResult = await runStep\([\s\S]*?invalidOutputRetryLimit: 1,[\s\S]*?responseMimeType: 'application\/json'/,
+  );
+  assert.match(
+    workflow,
+    /const runMetaDescriptionSuggestions = \(previousInvalidResponse\?: string\) => runStep\([\s\S]*?invalidOutputRetryLimit: 1,[\s\S]*?responseMimeType: 'application\/json'/,
+  );
   assert.match(workflow, /structuralJsonRepairApplied/);
   assert.match(workflow, /buildContentWritingCoverageAuditPrompt/);
   assert.match(workflow, /section-repair-/);
