@@ -363,7 +363,10 @@ export const executeOpenAiRequest = async (
     if (options.signal?.aborted) {
       return finalize({ status: 499, body: { error: 'OpenAI request was cancelled.', code: 'AI_REQUEST_CANCELLED' } });
     }
-    const capabilities = await readAiProviderCapabilities(telemetry.actorUserId);
+    const capabilities = await readAiProviderCapabilities(
+      telemetry.actorUserId,
+      options.credentialPurpose || 'standard',
+    );
     const capability = capabilities.providers.openai;
     selectedModel = capability.model || DEFAULT_OPENAI_MODEL;
     if (!capability.enabled) {

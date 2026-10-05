@@ -336,6 +336,15 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(engine, /executeContentWritingTurn/);
   assert.match(engine, /executeOpenAiRequest/);
   assert.match(engine, /credentialPurpose = options\.session\.progress\?\.resumed === true/);
+  assert.match(engine, /selectProviderModel\(provider, requestedModel, userId, 'content_writing_resume'\)/);
+  assert.match(
+    geminiEngine,
+    /readAiProviderCapabilities\(\s*userId,\s*options\.credentialPurpose \|\| 'standard'/,
+  );
+  assert.match(
+    openAiEngine,
+    /readAiProviderCapabilities\(\s*telemetry\.actorUserId,\s*options\.credentialPurpose \|\| 'standard'/,
+  );
   assert.doesNotMatch(engine, /competitor\.content\.slice|content_text\.slice/);
   assert.match(workflow, /executeStructuredContentWritingWorkflow/);
   assert.match(workflow, /getContentWritingSteps/);
@@ -385,7 +394,6 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(service, /ContentWritingSessionSummary/);
   assert.doesNotMatch(service.match(/export const listContentWritingSessions[\s\S]*?export const cancelContentWritingSession/)?.[0] || '', /\.select\('\*'\)/);
   assert.match(geminiEngine, /systemInstruction: normalizedSystemInstruction/);
-  assert.match(openAiEngine, /readAiProviderCapabilities\(telemetry\.actorUserId\)/);
   assert.match(openAiEngine, /recordAiExecutionTelemetry/);
   assert.match(openAiEngine, /prompt_cache_key/);
   assert.match(openAiEngine, /conversationMode === 'independent'/);

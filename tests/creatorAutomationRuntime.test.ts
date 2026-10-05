@@ -396,7 +396,7 @@ test('resuming free Gemini rebuilds paid-provider routing from the saved user pr
     paidFallbackModel: 'gemini-paid-model',
   });
   assert.deepEqual(state.capabilityReads, [
-    ['creator-a'],
+    ['creator-a', 'content_writing_resume'],
     ['creator-a', 'content_writing_resume'],
   ]);
 

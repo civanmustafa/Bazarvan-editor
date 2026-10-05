@@ -830,6 +830,7 @@ const executeGeminiCredentialTierInternal = async (
       selectedProvider,
       internal.capabilities || await readAiProviderCapabilities(
         internal.userId || normalizeAiExecutionTelemetryContext(options.telemetry).actorUserId,
+        options.credentialPurpose || 'standard',
       ),
     );
     if (capabilityFailure) {
@@ -1577,7 +1578,10 @@ const executeGeminiRequestInternal = async (
   options: GeminiExecutionOptions,
 ): Promise<ApiResult> => {
   const userId = normalizeAiExecutionTelemetryContext(options.telemetry).actorUserId;
-  const capabilities = await readAiProviderCapabilities(userId);
+  const capabilities = await readAiProviderCapabilities(
+    userId,
+    options.credentialPurpose || 'standard',
+  );
   const requestedProvider = normalizeGeminiProvider(requestBody?.provider);
   const effectiveRequestBody = await applyGeminiFreeModelFallbackPolicy(requestBody);
   const primaryResult = await executeGeminiProviderRequestInternal(

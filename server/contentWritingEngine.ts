@@ -268,8 +268,9 @@ const selectProviderModel = async (
   provider: ContentWritingProvider,
   requestedModel?: string,
   userId?: string,
+  credentialPurpose: 'standard' | 'content_writing_resume' = 'standard',
 ): Promise<string> => {
-  const capabilities = await readAiProviderCapabilities(userId);
+  const capabilities = await readAiProviderCapabilities(userId, credentialPurpose);
   const capability = capabilities.providers[provider];
   if (!capability.enabled) {
     throw new ContentWritingEngineError({
@@ -350,7 +351,7 @@ export const resolveContentWritingResumePreference = async (
   providerRouting: JsonObject;
 }> => {
   const [model, settings, providerRouting] = await Promise.all([
-    selectProviderModel(provider, requestedModel, userId),
+    selectProviderModel(provider, requestedModel, userId, 'content_writing_resume'),
     getContentWritingSettings(),
     resolveContentWritingProviderRouting(provider, userId),
   ]);
