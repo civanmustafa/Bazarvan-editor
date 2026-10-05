@@ -266,15 +266,18 @@ export const resolveGeminiApiKeys = async (
   purpose: AiCredentialPurpose = 'standard',
 ): Promise<ResolvedAiCredentialSet> => resolveCredentialSet(provider, userId, purpose);
 
-export const readAiProviderCredentialAvailability = async (userId?: string): Promise<{
+export const readAiProviderCredentialAvailability = async (
+  userId?: string,
+  purpose: AiCredentialPurpose = 'standard',
+): Promise<{
   gemini: AiProviderCredentialAvailability;
   openai: AiProviderCredentialAvailability;
   geminiPaid: AiProviderCredentialAvailability;
 }> => {
   const [gemini, openai, geminiPaid] = await Promise.all([
-    resolveGeminiApiKeys('gemini', userId),
-    resolveOpenAiApiKeys(userId),
-    resolveGeminiApiKeys('geminiPaid', userId),
+    resolveGeminiApiKeys('gemini', userId, purpose),
+    resolveOpenAiApiKeys(userId, purpose),
+    resolveGeminiApiKeys('geminiPaid', userId, purpose),
   ]);
   const toAvailability = (credentials: ResolvedAiCredentialSet): AiProviderCredentialAvailability => ({
     configured: credentials.keys.length > 0,

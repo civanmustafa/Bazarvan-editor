@@ -323,7 +323,9 @@ export const resolveContentWritingProviderRouting = async (
   if (!routingPreferences.freeFirstFallbackEnabled) return { mode: 'selected_only' };
 
   const paidFallbackProvider = routingPreferences.paidFallbackProvider;
-  const capabilities = await readAiProviderCapabilities(userId);
+  // A paid credential dedicated to content-writing recovery must be visible
+  // while the free-first route is frozen into a new or resumed session.
+  const capabilities = await readAiProviderCapabilities(userId, 'content_writing_resume');
   const paidFallbackCapability = capabilities.providers[paidFallbackProvider];
   return paidFallbackCapability?.available
     ? {
@@ -821,6 +823,7 @@ export const executeContentWritingTurn = async (options: {
     provider: ContentWritingProvider,
     model: string,
     allowProviderFallback: boolean,
+    requestCredentialPurpose = credentialPurpose,
   ) => provider === 'openai'
     ? executeOpenAiRequest({
       instructions: currentSystemInstructions,
@@ -836,7 +839,7 @@ export const executeContentWritingTurn = async (options: {
     }, {
       signal: options.signal,
       telemetry,
-      credentialPurpose,
+      credentialPurpose: requestCredentialPurpose,
       allowProviderFallback,
     })
     : aiExecutionEngine.executeGemini({
@@ -857,12 +860,19 @@ export const executeContentWritingTurn = async (options: {
       signal: options.signal,
       telemetry,
       onProgress: options.onProgress,
-      credentialPurpose,
+      credentialPurpose: requestCredentialPurpose,
       allowProviderFallback,
     });
-  const routing = isRecord(options.session.context_snapshot?.providerRouting)
+  const storedRouting = isRecord(options.session.context_snapshot?.providerRouting)
     ? options.session.context_snapshot.providerRouting
     : {};
+  // Automatic retries can outlive the credential configuration captured when
+  // the session was created. Re-evaluate an unavailable route on resume so a
+  // newly saved paid key is used without discarding completed writing steps.
+  const routing = options.session.provider === 'gemini'
+    && (options.session.progress?.resumed === true || storedRouting.unavailablePaidFallbackProvider)
+    ? await resolveContentWritingProviderRouting('gemini', options.session.created_by)
+    : storedRouting;
   const freeFirst = options.session.provider === 'gemini'
     && routing.mode === 'free_first'
     && (routing.paidFallbackProvider === 'geminiPaid' || routing.paidFallbackProvider === 'openai')
@@ -884,6 +894,7 @@ export const executeContentWritingTurn = async (options: {
         paidFallbackProvider,
         toText(routing.paidFallbackModel),
         false,
+        'content_writing_resume',
       );
       rawResult = mergeProviderFallbackResult({
         previous: primaryResult,

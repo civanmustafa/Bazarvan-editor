@@ -651,7 +651,7 @@ test('administrator AI overrides are encrypted, admin-only, and resolved by shar
   assert.match(settingsPage, /\{isAdmin && \(\s*<SettingsSection title="مركز المزودات والمفاتيح والصلاحيات">/);
   assert.doesNotMatch(settingsPage, /AdminAiProviderSecretsSettings|AdminCrawlerProviderSecretsSettings/);
   assert.doesNotMatch(secretService, /saveCredentialGrant/);
-  assert.match(capabilityService, /readAiProviderCredentialAvailability\(userId\)/);
+  assert.match(capabilityService, /readAiProviderCredentialAvailability\(userId,\s*credentialPurpose\)/);
   assert.match(openAiExecutionEngine, /resolveOpenAiApiKeys\(\s*telemetry\.actorUserId,\s*options\.credentialPurpose/);
   assert.match(aiExecutionEngine, /resolveGeminiApiKeys\(provider, userId, options\.credentialPurpose\)/);
   assert.doesNotMatch(openAiExecutionEngine, /process\.env\.OPENAI_API_KEYS?/);

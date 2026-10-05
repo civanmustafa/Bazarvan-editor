@@ -296,6 +296,7 @@ test('queued creator writing is cancelled before AI calls while manual sessions 
     contentWritingWorkflow: `export const executeStructuredContentWritingWorkflow = async () => { s.workflowCalls++; return { ok: true, text: "result", metadata: {} }; };
       export const contentWritingMarkdownToPlainText = value => value;`,
     contentWritingSessionService: `export const claimNextContentWritingSession = async () => null;
+      export const contentWritingSessionMayFinishCurrentRun = async () => false;
       export const applyAutomaticContentWritingSession = async () => null;
       export const completeContentWritingSession = async () => true;
       export const failContentWritingSession = async value => { s.failures.push(value); };
@@ -362,6 +363,7 @@ test('a writing response already in flight is retained, but the next paid stage 
 
 test('resuming free Gemini rebuilds paid-provider routing from the saved user preference', async () => {
   const state = createFixture();
+  state.capabilityReads = [];
   state.routing = {
     contentWritingProvider: 'gemini',
     automaticContentWritingProvider: 'system',
@@ -376,7 +378,7 @@ test('resuming free Gemini rebuilds paid-provider routing from the saved user pr
     },
   };
   const engine = await loadRuntime('server/contentWritingEngine.ts', state, {
-    aiProviderCapabilities: 'export const readAiProviderCapabilities = async () => s.capabilities;',
+    aiProviderCapabilities: 'export const readAiProviderCapabilities = async (...args) => { s.capabilityReads.push(args); return s.capabilities; };',
     userAiRoutingPreferences: 'export const readUserAiRoutingPreferences = async () => s.routing;',
     promptRegistrySettings: 'export const readPromptRegistrySettings = async () => ({ templates: {}, registryVersion: 1 });',
     aiExecutionEngine: 'export const aiExecutionEngine = {}; export const sanitizeAiExecutionResult = value => value;',
@@ -393,6 +395,10 @@ test('resuming free Gemini rebuilds paid-provider routing from the saved user pr
     paidFallbackProvider: 'geminiPaid',
     paidFallbackModel: 'gemini-paid-model',
   });
+  assert.deepEqual(state.capabilityReads, [
+    ['creator-a'],
+    ['creator-a', 'content_writing_resume'],
+  ]);
 
   state.routing.freeFirstFallbackEnabled = false;
   const selectedOnly = await engine.resolveContentWritingResumePreference(
@@ -401,6 +407,58 @@ test('resuming free Gemini rebuilds paid-provider routing from the saved user pr
     'creator-a',
   );
   assert.deepEqual(selectedOnly.providerRouting, { mode: 'selected_only' });
+});
+
+test('an automatic retry discovers a newly saved paid key and uses its recovery credential tier', async () => {
+  const state = createFixture();
+  state.calls = [];
+  state.routing = {
+    contentWritingProvider: 'gemini',
+    automaticContentWritingProvider: 'system',
+    freeFirstFallbackEnabled: true,
+    paidFallbackProvider: 'geminiPaid',
+  };
+  state.capabilities = {
+    providers: {
+      gemini: { enabled: true, configured: true, available: true, model: 'gemini-free-model' },
+      geminiPaid: { enabled: true, configured: true, available: true, model: 'gemini-paid-model' },
+      openai: { enabled: false, configured: false, available: false, model: 'openai-model' },
+    },
+  };
+  state.responses = [
+    { status: 429, body: { code: 'gemini_http_429', error: 'Free keys exhausted.' } },
+    { status: 200, body: { text: 'Paid recovery result', model: 'gemini-paid-model' } },
+  ];
+  const engine = await loadRuntime('server/contentWritingEngine.ts', state, {
+    aiProviderCapabilities: 'export const readAiProviderCapabilities = async () => s.capabilities;',
+    userAiRoutingPreferences: 'export const readUserAiRoutingPreferences = async () => s.routing;',
+    providerAccessControl: 'export const resolveEffectiveProviderPolicy = async () => ({ allowProviderFallback: true });',
+    aiExecutionEngine: `export const aiExecutionEngine = { executeGemini: async (input, options) => {
+      s.calls.push({ input, options }); return s.responses.shift();
+    } }; export const sanitizeAiExecutionResult = value => value;`,
+    openAiExecutionEngine: 'export const executeOpenAiRequest = async () => ({ status: 500, body: {} });',
+  });
+  const result = await engine.executeContentWritingTurn({
+    session: {
+      id: 'session-1', article_id: 'article-1', created_by: 'creator-a',
+      provider: 'gemini', model: 'gemini-free-model',
+      context_snapshot: {
+        triggerSource: 'automatic_ready',
+        providerRouting: { mode: 'selected_only', unavailablePaidFallbackProvider: 'geminiPaid' },
+      },
+      progress: { resumed: true },
+    },
+    messages: [
+      { sequence_number: 1, stage: 'instructions', role: 'system', content: 'Instructions' },
+      { sequence_number: 2, stage: 'article_context', role: 'user', content: 'Context' },
+      { sequence_number: 3, stage: 'generation_request', role: 'user', content: 'Write' },
+    ],
+    prompt: 'Resume the failed step', stepKey: 'section-1', stepLabel: 'First', stepAttempt: 2,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.text, 'Paid recovery result');
+  assert.deepEqual(state.calls.map((call: any) => call.input.provider), ['gemini', 'geminiPaid']);
+  assert.equal(state.calls[1].options.credentialPurpose, 'content_writing_resume');
 });
 
 test('resumed writing restores frozen source instructions once for old, current, and overridden contexts', async () => {
