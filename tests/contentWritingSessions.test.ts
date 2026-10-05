@@ -349,6 +349,8 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(service, /p_model: options\.model/);
   assert.match(service, /p_input_hash: options\.inputHash/);
   assert.match(service, /p_provider_routing: options\.providerRouting/);
+  assert.match(service, /triggerSource: 'explicit_resume'/);
+  assert.match(service, /resumedFromTriggerSource: 'automatic_ready'/);
   assert.match(service, /ContentWritingSessionSummary/);
   assert.doesNotMatch(service.match(/export const listContentWritingSessions[\s\S]*?export const cancelContentWritingSession/)?.[0] || '', /\.select\('\*'\)/);
   assert.match(geminiEngine, /systemInstruction: normalizedSystemInstruction/);
@@ -382,6 +384,7 @@ test('content-writing API enforces authentication, article access, and idempoten
   assert.match(api, /provider: preference\.provider/);
   assert.match(api, /model: preference\.model/);
   assert.match(api, /content_writing_paid_fallback_unavailable/);
+  assert.match(api, /prepareContentWritingSessionForExplicitResume\(session\)/);
   assert.match(api, /action === 'recordApplication'/);
   assert.match(api, /recordContentWritingApplication/);
   assert.match(api, /resolveSessionQualityReport/);

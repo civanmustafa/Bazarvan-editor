@@ -27,6 +27,7 @@ import {
   getContentWritingSession,
   getContentWritingSteps,
   listContentWritingSessions,
+  prepareContentWritingSessionForExplicitResume,
   recordContentWritingApplication,
   resumeContentWritingSession,
   type ContentWritingProvider,
@@ -697,14 +698,26 @@ const handleContentWritingRequest = async (req: any): Promise<ApiResult> => {
       provider: preference.provider,
       model: preference.model,
     });
-    const messages = await getContentWritingMessages(session.id);
+    // A session created by the automatic queue must stop competing for the
+    // global finish-first lane once the user explicitly resumes it. Otherwise
+    // the automatic-focus trigger can reject the queued transition after the
+    // reservation has already cancelled the old automation item.
+    const resumableSession = await prepareContentWritingSessionForExplicitResume(session);
+    if (!resumableSession) {
+      throw new ContentWritingApiError({
+        message: 'The content writing session changed before it could be resumed.',
+        status: 409,
+        code: 'content_writing_resume_conflict',
+      });
+    }
+    const messages = await getContentWritingMessages(resumableSession.id);
     const inputHash = createContentWritingSessionInputHash(
       preference.provider,
       preference.model,
       [JSON.stringify(preference.providerRouting), ...messages.map(message => message.content)],
     );
     const resumed = await resumeContentWritingSession({
-      sessionId: session.id,
+      sessionId: resumableSession.id,
       requestedBy: principal.userId,
       provider: preference.provider,
       model: preference.model,

@@ -539,6 +539,27 @@ export const cancelContentWritingSession = async (options: {
   return firstRow<ContentWritingSession>(data);
 };
 
+export const prepareContentWritingSessionForExplicitResume = async (
+  session: ContentWritingSession,
+): Promise<ContentWritingSession | null> => {
+  if (session.context_snapshot?.triggerSource !== 'automatic_ready') return session;
+  const { data, error } = await getExternalAnalysisSupabaseAdmin()
+    .from('content_writing_sessions')
+    .update({
+      context_snapshot: {
+        ...session.context_snapshot,
+        triggerSource: 'explicit_resume',
+        resumedFromTriggerSource: 'automatic_ready',
+      },
+    })
+    .eq('id', session.id)
+    .in('status', ['failed', 'cancelled'])
+    .select('*')
+    .maybeSingle();
+  if (error) throwServiceError('explicit session resume preparation', error);
+  return data as ContentWritingSession | null;
+};
+
 export const resumeContentWritingSession = async (options: {
   sessionId: string;
   requestedBy: string;
