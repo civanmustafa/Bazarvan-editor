@@ -165,6 +165,7 @@ interface ExternalAnalysisCardControlsProps {
   contentWritingSummary?: ContentWritingArticleSummary;
   summary?: ExternalAnalysisDashboardSummary;
   onRefresh: () => Promise<void> | void;
+  readOnly?: boolean;
 }
 
 const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> = ({
@@ -182,6 +183,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
   contentWritingSummary,
   summary,
   onRefresh,
+  readOnly = false,
 }) => {
   const { t } = useUser();
   const locale = t.locale === 'en' ? 'en' : 'ar';
@@ -689,19 +691,19 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           <AutomationStageChip
             stage={getAutomationStage('alternative_keywords')}
             icon={<Tags size={12} />}
-            onClick={requirementsEnabled ? handleSemanticStageClick : undefined}
+            onClick={requirementsEnabled && !readOnly ? handleSemanticStageClick : undefined}
             disabled={Boolean(busyAction || semanticJobActive)}
           />
           <AutomationStageChip
             stage={getAutomationStage('lsi_keywords')}
             icon={<Sparkles size={12} />}
-            onClick={requirementsEnabled ? handleSemanticStageClick : undefined}
+            onClick={requirementsEnabled && !readOnly ? handleSemanticStageClick : undefined}
             disabled={Boolean(busyAction || semanticJobActive)}
           />
           <AutomationStageChip
             stage={getAutomationStage('google_metadata')}
             icon={<FileSearch size={12} />}
-            onClick={requirementsEnabled ? handleSemanticStageClick : undefined}
+            onClick={requirementsEnabled && !readOnly ? handleSemanticStageClick : undefined}
             disabled={Boolean(busyAction || semanticJobActive)}
           />
         </div>
@@ -715,13 +717,13 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
           <AutomationStageChip
             stage={getAutomationStage('competitor_discovery')}
             icon={<Search size={12} />}
-            onClick={requirementsEnabled ? () => { void handleCompetitors(); } : undefined}
+            onClick={requirementsEnabled && !readOnly ? () => { void handleCompetitors(); } : undefined}
             disabled={busyAction === 'competitor'}
           />
           <AutomationStageChip
             stage={getAutomationStage('competitor_extraction')}
             icon={<Download size={12} />}
-            onClick={requirementsEnabled ? () => { void handleCompetitors(); } : undefined}
+            onClick={requirementsEnabled && !readOnly ? () => { void handleCompetitors(); } : undefined}
             disabled={busyAction === 'competitor'}
           />
         </div>
@@ -736,7 +738,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
             <AutomationStageChip
               stage={getAutomationStage('external_analysis')}
               icon={<ListChecks size={12} />}
-              onClick={requirementsEnabled ? () => setMenuOpen(open => !open) : undefined}
+              onClick={requirementsEnabled && !readOnly ? () => setMenuOpen(open => !open) : undefined}
               disabled={busyAction === 'engineering'}
             />
             {menuOpen && (
@@ -806,7 +808,7 @@ const ExternalAnalysisCardControls: React.FC<ExternalAnalysisCardControlsProps> 
         <AutomationStageChip stage={getAutomationStage('duplicate_suggestions')} icon={<Repeat size={12} />} />
         <AutomationStageChip stage={getAutomationStage('internal_linking')} icon={<Link2 size={12} />} />
 
-        {(semanticJobActive || engineeringActive || competitorJobActive) && (
+        {!readOnly && (semanticJobActive || engineeringActive || competitorJobActive) && (
           <button
             type="button"
             onClick={() => void handleCancelAll()}

@@ -20,6 +20,11 @@ type ArticleAccessSource = {
   metadata?: unknown;
 };
 
+type ArticleAccessUser = {
+  id?: string | null;
+  email?: string | null;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   !!value && typeof value === 'object' && !Array.isArray(value)
 );
@@ -57,6 +62,57 @@ const splitVisibleEmails = (value: unknown): string[] => (
         .filter(Boolean)))
     : []
 );
+
+export const isArticleAssignedToUser = (
+  article: ArticleAccessSource,
+  user: ArticleAccessUser,
+): boolean => getArticleAssignmentRoleForUser(article, user) !== null;
+
+export const getArticleAssignmentRoleForUser = (
+  article: ArticleAccessSource,
+  user: ArticleAccessUser,
+): ArticleAccessBadgeRole | null => {
+  const userId = typeof user.id === 'string' ? user.id.trim() : '';
+  const userEmail = typeof user.email === 'string' ? user.email.trim().toLowerCase() : '';
+  if (!userId && !userEmail) return null;
+
+  if (userId && [article.ownerId, article.assignedTo].some(value => (
+    typeof value === 'string' && value.trim() === userId
+  ))) {
+    return 'editor';
+  }
+
+  const metadata = isRecord(article.metadata) ? article.metadata : {};
+  const n8nSettings = isRecord(metadata.n8nSettings) ? metadata.n8nSettings : {};
+  const fallbackRole = normalizeRole(n8nSettings.accessRole, 'viewer');
+  const visibleTo = Array.isArray(metadata.visibleTo) ? metadata.visibleTo : [];
+  let explicitRole: ArticleAccessBadgeRole | null = null;
+  visibleTo.forEach(value => {
+    if (!isRecord(value)) return;
+    const assignedId = typeof value.id === 'string' ? value.id.trim() : '';
+    const assignedEmail = typeof value.email === 'string' ? value.email.trim().toLowerCase() : '';
+    const matches = Boolean(
+      (userId && assignedId === userId)
+      || (userEmail && assignedEmail === userEmail)
+    );
+    if (!matches) return;
+    const role = normalizeRole(value.role, fallbackRole);
+    if (role === 'editor' || explicitRole === null) explicitRole = role;
+  });
+  if (explicitRole) return explicitRole;
+
+  if (
+    userEmail
+    && splitVisibleEmails(n8nSettings.visibleToEmailsCsv).includes(userEmail)
+  ) {
+    return fallbackRole;
+  }
+
+  if (userId && typeof article.createdBy === 'string' && article.createdBy.trim() === userId) {
+    return 'viewer';
+  }
+  return null;
+};
 
 export const getArticleAccessBadges = (
   article: ArticleAccessSource,

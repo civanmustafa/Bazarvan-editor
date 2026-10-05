@@ -64,6 +64,7 @@ import {
 } from '../utils/aiExecutionActivity';
 import {
   getArticleAccessBadges,
+  getArticleAssignmentRoleForUser,
   getArticleAccessDisplayName,
   isImplicitArticleAdministrator,
   type ArticleAccessBadge,
@@ -732,6 +733,7 @@ interface ArticleItemProps {
     isTrashView?: boolean;
     showAdminMetadata?: boolean;
     showExternalAnalysisControls?: boolean;
+    canManageExternalAnalysis?: boolean;
     externalAnalysisSummary?: ExternalAnalysisDashboardSummary;
     contentWritingSummary?: ContentWritingArticleSummary;
     onRefreshExternalAnalysis?: () => Promise<void> | void;
@@ -764,6 +766,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
     isTrashView = false,
     showAdminMetadata = false,
     showExternalAnalysisControls = false,
+    canManageExternalAnalysis = false,
     externalAnalysisSummary,
     contentWritingSummary,
     onRefreshExternalAnalysis,
@@ -1060,7 +1063,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                               </button>
                             </>
                         )}
-                        {!isTrashView && articleId && onUpdateSettings && showExternalAnalysisControls && (
+                        {!isTrashView && articleId && onUpdateSettings && canManageExternalAnalysis && (
                             <ArticleAutomationOverridesControl
                                 articleId={articleId}
                                 articleTitle={untranslatedTitle}
@@ -1212,6 +1215,7 @@ const ArticleListItem: React.FC<ArticleItemProps> = ({
                         contentWritingSummary={contentWritingSummary}
                         summary={externalAnalysisSummary}
                         onRefresh={onRefreshExternalAnalysis}
+                        readOnly={!canManageExternalAnalysis}
                     />
                 )}
             </div>
@@ -1224,6 +1228,7 @@ const Dashboard: React.FC = () => {
   const {
     currentUser,
     currentUserId,
+    currentUserEmail,
     currentUserRole,
     handleLogout: onLogout,
     isDarkMode,
@@ -2428,6 +2433,14 @@ const Dashboard: React.FC = () => {
                             .sort((a, b) => getArticleSortTime(b) - getArticleSortTime(a))
                             .map((activity) => {
                               const trashInfo = getArticleTrashInfo(activity, currentUserId);
+                              const currentUserAssignmentRole = getArticleAssignmentRoleForUser(activity, {
+                                id: currentUserId,
+                                email: currentUserEmail,
+                              });
+                              const assignedToCurrentUser = currentUserAssignmentRole !== null;
+                              const canManageExternalAnalysis = !isTrashVisible && (
+                                isAdmin || currentUserAssignmentRole === 'editor'
+                              );
                               return (
                                 <ArticleListItem
                                     key={activity.id}
@@ -2459,9 +2472,8 @@ const Dashboard: React.FC = () => {
                                       : ['status']}
                                     isTrashView={isTrashVisible}
                                     showAdminMetadata={isAdmin}
-                                    showExternalAnalysisControls={!isTrashVisible && (
-                                      isAdmin || activity.ownerId === currentUserId || activity.assignedTo === currentUserId
-                                    )}
+                                    showExternalAnalysisControls={!isTrashVisible && (isAdmin || assignedToCurrentUser)}
+                                    canManageExternalAnalysis={canManageExternalAnalysis}
                                     externalAnalysisSummary={externalAnalysisSummaries[activity.id]}
                                     contentWritingSummary={contentWritingArticleSummaries[activity.id]}
                                     onRefreshExternalAnalysis={refreshExternalAnalysisSummaries}

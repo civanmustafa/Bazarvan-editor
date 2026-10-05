@@ -3,7 +3,9 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   getArticleAccessBadges,
+  getArticleAssignmentRoleForUser,
   getArticleAccessDisplayName,
+  isArticleAssignedToUser,
 } from '../utils/articleAccessBadges.ts';
 
 test('article access names expose only the part before @', () => {
@@ -72,6 +74,33 @@ test('the canonical administrator email remains implicit even when legacy metada
   assert.deepEqual(badges, []);
 });
 
+test('automation status visibility follows article assignment regardless of viewer or editor role', () => {
+  const article = {
+    ownerId: 'owner-id',
+    createdBy: 'creator-id',
+    assignedTo: null,
+    metadata: {
+      n8nSettings: {
+        visibleToEmailsCsv: 'legacy-viewer@example.com',
+      },
+      visibleTo: [
+        { id: 'viewer-id', email: 'viewer@example.com', role: 'viewer' },
+        { id: 'editor-id', email: 'editor@example.com', role: 'editor' },
+      ],
+    },
+  };
+
+  assert.equal(isArticleAssignedToUser(article, { id: 'viewer-id' }), true);
+  assert.equal(isArticleAssignedToUser(article, { id: 'editor-id' }), true);
+  assert.equal(isArticleAssignedToUser(article, { email: 'legacy-viewer@example.com' }), true);
+  assert.equal(isArticleAssignedToUser(article, { id: 'creator-id' }), true);
+  assert.equal(isArticleAssignedToUser(article, { id: 'unrelated-user' }), false);
+  assert.equal(getArticleAssignmentRoleForUser(article, { id: 'viewer-id' }), 'viewer');
+  assert.equal(getArticleAssignmentRoleForUser(article, { id: 'editor-id' }), 'editor');
+  assert.equal(getArticleAssignmentRoleForUser(article, { email: 'legacy-viewer@example.com' }), 'viewer');
+  assert.equal(getArticleAssignmentRoleForUser(article, { id: 'creator-id' }), 'viewer');
+});
+
 test('dashboard cards merge access badges into the existing users field without a duplicate row', async () => {
   const dashboard = await readFile(
     new URL('../components/Dashboard.tsx', import.meta.url),
@@ -79,6 +108,9 @@ test('dashboard cards merge access badges into the existing users field without 
   );
 
   assert.match(dashboard, /getArticleAccessBadges\(remoteActivity, profiles\)/);
+  assert.match(dashboard, /getArticleAssignmentRoleForUser\(activity/);
+  assert.match(dashboard, /showExternalAnalysisControls=\{!isTrashVisible && \(isAdmin \|\| assignedToCurrentUser\)\}/);
+  assert.match(dashboard, /canManageExternalAnalysis=\{canManageExternalAnalysis\}/);
   assert.match(dashboard, /const ArticleAccessBadgesInline/);
   assert.match(dashboard, /<ArticleAccessUsersField[\s\S]*badges=\{articleAccessBadges\}/);
   assert.match(dashboard, /<EditableN8nUsersField[\s\S]*accessBadges=\{articleAccessBadges\}/);

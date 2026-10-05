@@ -62,6 +62,7 @@ type Profile = {
 interface UserContextType {
     currentUser: string | null;
     currentUserId: string | null;
+    currentUserEmail: string | null;
     currentUserRole: UserRole;
     currentView: AppView;
     isAuthLoading: boolean;
@@ -222,6 +223,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Screen-level state. AppContent in App.tsx reads currentView to choose the visible page.
     const [currentUser, setCurrentUser] = useState<string | null>(null);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
     const [currentUserRole, setCurrentUserRole] = useState<UserRole>('user');
     const [currentView, setCurrentViewState] = useState<AppView>('login');
     const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -271,6 +273,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             resetGeminiModelPreferences();
             setCurrentUser(null);
             setCurrentUserId(null);
+            setCurrentUserEmail(null);
             setCurrentUserRole('user');
             setClientGoalContexts({});
             setEngineeringPrompts(normalizeEngineeringPrompts(DEFAULT_ENGINEERING_PROMPTS));
@@ -290,6 +293,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const label = getProfileLabel(profile, user);
         setCurrentUser(label);
         setCurrentUserId(user.id);
+        setCurrentUserEmail(profile?.email?.trim() || user.email?.trim() || null);
         setCurrentUserRole(profile?.role === 'admin' ? 'admin' : 'user');
         try {
             sessionStorage.setItem('currentUser', label);
@@ -872,6 +876,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const value = useMemo<UserContextType>(() => ({
         currentUser,
         currentUserId,
+        currentUserEmail,
         currentUserRole,
         currentView,
         isAuthLoading,
@@ -907,6 +912,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }), [
         currentUser,
         currentUserId,
+        currentUserEmail,
         currentUserRole,
         currentView,
         isAuthLoading,
