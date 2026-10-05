@@ -631,6 +631,154 @@ const formatCountdown = (milliseconds: number, isArabic: boolean): string => {
   ].join(' ');
 };
 
+type OperationTimingDetail = {
+  text: string;
+  tone: 'blue' | 'amber' | 'red' | 'emerald' | 'gray';
+};
+
+const OPERATION_TIMING_STYLE: Record<OperationTimingDetail['tone'], string> = {
+  blue: 'border-blue-100 bg-blue-50/70 text-blue-700 dark:border-blue-900/50 dark:bg-blue-900/10 dark:text-blue-200',
+  amber: 'border-amber-100 bg-amber-50/70 text-amber-700 dark:border-amber-900/50 dark:bg-amber-900/10 dark:text-amber-200',
+  red: 'border-red-100 bg-red-50/70 text-red-700 dark:border-red-900/50 dark:bg-red-900/10 dark:text-red-200',
+  emerald: 'border-emerald-100 bg-emerald-50/70 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-900/10 dark:text-emerald-200',
+  gray: 'border-gray-100 bg-gray-50/70 text-gray-600 dark:border-gray-700 dark:bg-gray-900/20 dark:text-gray-300',
+};
+
+const getOperationTimingDetail = (
+  operation: DashboardAutomationOperation,
+  now: number,
+  isArabic: boolean,
+): OperationTimingDetail => {
+  const leadTask = operation.tasks?.[0] || null;
+  const rawReason = `${leadTask?.reasonCode || ''} ${leadTask?.reason || ''} ${operation.errorCode} ${operation.errorMessage}`;
+  const waitingForKeys = /(?:gemini\s+keys?|key availability|no eligible key|cooldown|quota|rate.?limit|\b429\b|مفتاح|مفاتيح|الحصة|التبريد)/i
+    .test(rawReason);
+  const formatDate = (value: string): string => new Date(value).toLocaleString(isArabic ? 'ar' : 'en');
+  const validDate = (value: string | null | undefined): value is string => Boolean(
+    value && Number.isFinite(Date.parse(value)),
+  );
+
+  if (!leadTask) {
+    if (operation.enabled === false) {
+      return {
+        tone: 'gray',
+        text: isArabic
+          ? 'لا يوجد موعد تنفيذ: هذه العملية متوقفة وفق إعدادات الأتمتة.'
+          : 'No execution time: this operation is disabled in automation settings.',
+      };
+    }
+    if (operation.status === 'completed') {
+      return {
+        tone: 'emerald',
+        text: isArabic
+          ? 'مكتملة حاليًا؛ لا توجد محاولة جديدة مطلوبة.'
+          : 'Currently complete; no new attempt is required.',
+      };
+    }
+    if (operation.status === 'attention') {
+      return {
+        tone: 'red',
+        text: isArabic
+          ? 'لا يمكن جدولة محاولة جديدة حتى معالجة المشكلة الموضحة أدناه.'
+          : 'A new attempt cannot be scheduled until the issue below is resolved.',
+      };
+    }
+    return {
+      tone: 'gray',
+      text: isArabic
+        ? 'لا توجد مهمة مستحقة أو مجدولة الآن؛ يعيد المحرك تقييمها تلقائيًا.'
+        : 'No task is due or scheduled now; the engine re-evaluates it automatically.',
+    };
+  }
+
+  if (leadTask.status === 'running') {
+    return validDate(leadTask.startedAt)
+      ? {
+        tone: 'blue',
+        text: isArabic
+          ? `بدأ التنفيذ فعليًا: ${formatDate(leadTask.startedAt)}.`
+          : `Execution actually started: ${formatDate(leadTask.startedAt)}.`,
+      }
+      : {
+        tone: 'blue',
+        text: isArabic
+          ? 'التنفيذ جارٍ الآن، لكن وقت البدء غير مسجل.'
+          : 'Execution is running now, but its start time was not recorded.',
+      };
+  }
+
+  if (leadTask.status === 'scheduled') {
+    const scheduleAt = leadTask.scheduleAt || operation.retryAt;
+    const isRetry = leadTask.reasonCode === 'retry_scheduled' || leadTask.attemptCount > 0;
+    const appointmentLabel = isRetry
+      ? (isArabic ? 'موعد إعادة المحاولة' : 'Retry time')
+      : (isArabic ? 'موعد التنفيذ' : 'Execution time');
+    if (validDate(scheduleAt)) {
+      const delay = Date.parse(scheduleAt) - now;
+      if (delay > 0) {
+        return {
+          tone: 'amber',
+          text: `${appointmentLabel}: ${formatDate(scheduleAt)} (${isArabic ? 'بعد' : 'in'} ${formatCountdown(delay, isArabic)}).`,
+        };
+      }
+      return {
+        tone: waitingForKeys ? 'amber' : 'blue',
+        text: waitingForKeys
+          ? (isArabic
+            ? `${appointmentLabel} كان ${formatDate(scheduleAt)}؛ انتهت التهدئة وما زالت المهمة بانتظار مفتاح مؤهل.`
+            : `${appointmentLabel} was ${formatDate(scheduleAt)}; cooldown ended and the task is still waiting for an eligible key.`)
+          : (isArabic
+            ? `${appointmentLabel} كان ${formatDate(scheduleAt)}؛ المهمة مستحقة الآن وبانتظار العامل.`
+            : `${appointmentLabel} was ${formatDate(scheduleAt)}; the task is due now and waiting for a worker.`),
+      };
+    }
+    return {
+      tone: 'amber',
+      text: waitingForKeys
+        ? (isArabic
+          ? 'بانتظار مفاتيح مؤهلة؛ لا يوجد موعد محاولة مؤكد من المزود حتى الآن.'
+          : 'Waiting for eligible keys; the provider has not supplied a confirmed retry time yet.')
+        : (isArabic
+          ? 'المهمة في الطابور، لكن لا يوجد وقت ثابت؛ ستبدأ عند توفر العامل ووصول دورها.'
+          : 'The task is queued without a fixed time; it will start when a worker is available and its turn arrives.'),
+    };
+  }
+
+  if (leadTask.status === 'ready') {
+    return {
+      tone: 'blue',
+      text: validDate(leadTask.readyAt)
+        ? (isArabic
+          ? `جاهزة للتنفيذ منذ ${formatDate(leadTask.readyAt)}؛ بانتظار أن يحجزها العامل.`
+          : `Ready since ${formatDate(leadTask.readyAt)}; waiting for a worker to claim it.`)
+        : (isArabic
+          ? 'جاهزة للتنفيذ؛ ستبدأ في أول دورة عامل متاحة.'
+          : 'Ready to run; it will start on the next available worker cycle.'),
+    };
+  }
+
+  if (leadTask.status === 'unscheduled') {
+    const reason = getTaskReasonLabel(leadTask, isArabic);
+    return {
+      tone: 'gray',
+      text: isArabic
+        ? `لا يمكن جدولتها الآن${reason ? `: ${reason}` : '؛ لم يسجل النظام متطلبًا محددًا بعد.'}`
+        : `Cannot be scheduled now${reason ? `: ${reason}` : '; the system has not recorded a specific requirement yet.'}`,
+    };
+  }
+
+  return {
+    tone: 'red',
+    text: waitingForKeys
+      ? (isArabic
+        ? 'لا يوجد موعد جديد: المهمة بانتظار توفر مفاتيح مؤهلة أو تدخل المسؤول.'
+        : 'No new time is available: the task is waiting for eligible keys or administrator action.')
+      : (isArabic
+        ? 'لا يوجد موعد محاولة جديد؛ يجب معالجة سبب التعثر ثم إعادة الجدولة.'
+        : 'No new attempt is scheduled; resolve the failure and then reschedule it.'),
+  };
+};
+
 const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
   isArabic,
   isAdmin,
@@ -887,6 +1035,7 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
     const competitorProgress = operation.readyItemCount !== undefined && operation.totalItemCount !== undefined
       ? `${operation.readyItemCount}/${operation.totalItemCount}`
       : '';
+    const timingDetail = getOperationTimingDetail(operation, now, isArabic);
     return (
       <div
         key={operation.key}
@@ -965,14 +1114,13 @@ const AutomaticContentWritingQueuePanel: React.FC<Props> = ({
             {getAttemptLabel(operation.attemptCount, operation.maxAttempts, operation.tasks?.[0]?.attemptMetric, isArabic)}
           </span>
         )}
-        {operation.retryScheduled && operation.retryAt && (
-          <span className="mt-1.5 block text-[9px] font-bold leading-4 text-amber-600 dark:text-amber-300">
-            {Date.parse(operation.retryAt) > now
-              ? (isArabic ? 'الإعادة متاحة بعد ' : 'Retry eligible in ') + formatCountdown(Date.parse(operation.retryAt) - now, isArabic)
-              : (isArabic ? 'انتهت التهدئة؛ بانتظار دورها وتوفر المزود.' : 'Cooldown finished; waiting for its turn and provider availability.')}
-            <span className="block">{new Date(operation.retryAt).toLocaleString(isArabic ? 'ar' : 'en')}</span>
-          </span>
-        )}
+        <span
+          data-automation-operation-timing={operation.key}
+          className={`mt-1.5 flex items-start gap-1.5 rounded-md border px-2 py-1.5 text-[9px] font-bold leading-4 ${OPERATION_TIMING_STYLE[timingDetail.tone]}`}
+        >
+          <Clock3 size={11} className="mt-0.5 shrink-0" />
+          <span className="line-clamp-3">{timingDetail.text}</span>
+        </span>
         {operation.attemptsExhausted && (
           <span className="mt-1.5 block text-[9px] text-red-600 dark:text-red-300">
             {isArabic ? 'لن تُعاد تلقائيًا؛ افتح المقالة وأعد المحاولة يدويًا بعد معالجة السبب.' : 'No automatic retry remains. Open the article to retry after addressing the cause.'}

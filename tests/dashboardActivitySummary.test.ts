@@ -179,6 +179,12 @@ test('the automation queue keeps every user-controlled operation visible in one 
   assert.match(component, /document\.body\.style\.overflow = 'hidden'/);
   assert.match(component, /attention: countDashboardAutomationIssues\(operations\)/);
   assert.match(component, /getOperationErrorMessage\(operation, isArabic\)/);
+  assert.match(component, /data-automation-operation-timing=/);
+  assert.match(component, /getOperationTimingDetail\(operation, now, isArabic\)/);
+  assert.match(component, /موعد التنفيذ/);
+  assert.match(component, /موعد إعادة المحاولة/);
+  assert.match(component, /بانتظار مفاتيح مؤهلة/);
+  assert.match(component, /لا يمكن جدولتها الآن/);
   assert.match(component, /إدارة الأتمتة/);
   assert.match(component, /loadContentWritingAutomationStatus\(undefined, \{ draftOnly: true \}\)/);
   assert.match(component, /loadAutomaticRecoverySchedule\(\)/);
