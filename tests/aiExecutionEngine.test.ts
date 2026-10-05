@@ -54,6 +54,8 @@ test('one server engine owns Gemini execution, key rotation, and model fallback'
     'Gemini must exhaust the available keys on the strongest active model before moving to the next model.',
   );
   assert.match(engine, /recordAiExecutionTelemetry/);
+  assert.match(engine, /responseMimeType === 'application\/json'/);
+  assert.match(engine, /maxOutputTokens: boundedInteger\(maxOutputTokens/);
   assert.match(apiRoute, /server\/aiExecutionEngine/);
   assert.doesNotMatch(apiRoute, /new GoogleGenAI|claimGeminiApiKey/);
   assert.match(automation, /aiExecutionEngine\.executeGemini/);

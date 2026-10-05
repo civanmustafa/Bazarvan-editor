@@ -63,6 +63,16 @@ import {
 
 const GEMINI_ANALYSIS_MODEL = REGISTRY_GEMINI_ANALYSIS_MODEL;
 const GEMINI_PAID_ANALYSIS_MODEL = process.env.GEMINI_PAID_MODEL?.trim() || REGISTRY_GEMINI_PAID_ANALYSIS_MODEL;
+const boundedInteger = (
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(minimum, Math.min(maximum, Math.round(parsed)));
+};
 const ALLOWED_GEMINI_MODELS = new Set([
   ...GEMINI_FREE_MODEL_VALUES,
   ...GEMINI_PAID_MODEL_VALUES,
@@ -805,6 +815,8 @@ const executeGeminiCredentialTierInternal = async (
       allowModelFallback,
       fallbackModels,
       routingProfile,
+      maxOutputTokens,
+      responseMimeType,
     } = requestBody || {};
     const progressId = normalizeProgressId(rawProgressId);
     throwIfGeminiExecutionCancelled(progressId, options.signal);
@@ -1116,6 +1128,10 @@ const executeGeminiCredentialTierInternal = async (
                           tools: [{ urlContext: {} }],
                           toolConfig: { includeServerSideToolInvocations: true },
                         }
+                      : {}),
+                    maxOutputTokens: boundedInteger(maxOutputTokens, 8_000, 256, 32_000),
+                    ...(responseMimeType === 'application/json'
+                      ? { responseMimeType: 'application/json' }
                       : {}),
                     abortSignal: abortController.signal,
                   },

@@ -846,6 +846,10 @@ test('competitor coverage matrix and phrase intelligence are deterministic and c
   assert.match(settings, /contentWritingMultiCandidateGenerationEnabled/);
   assert.match(serverWorkflow, /buildContentWritingKnowledgeReconciliationPrompt/);
   assert.match(serverWorkflow, /knowledgeEnsemble/);
+  assert.match(serverWorkflow, /knowledgeExtractionFallback/);
+  assert.match(serverWorkflow, /degraded_single_pass/);
+  assert.match(serverWorkflow, /responseMimeType: 'application\/json'/);
+  assert.match(serverWorkflow, /successfulKnowledgePasses\.length === 1/);
   assert.match(serverWorkflow, /runCandidateStage/);
   assert.match(serverWorkflow, /candidateMode: 'single_balanced'/);
   assert.match(serverWorkflow, /knowledgeStrategyKey/);

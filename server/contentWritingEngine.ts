@@ -746,6 +746,7 @@ export const executeContentWritingTurn = async (options: {
   articleContextOverride?: string;
   additionalHistory?: ContentWritingTurnHistory[];
   maxOutputTokens?: number;
+  responseMimeType?: 'application/json';
   signal?: AbortSignal;
   onProgress?: (progress: AiExecutionProgress) => void;
 }): Promise<ContentWritingExecutionResult> => {
@@ -850,6 +851,8 @@ export const executeContentWritingTurn = async (options: {
       allowModelFallback: provider === 'gemini' && allowModelFallback,
       routingProfile: 'quality',
       progressId: requestId,
+      maxOutputTokens: options.maxOutputTokens || 8_000,
+      ...(options.responseMimeType ? { responseMimeType: options.responseMimeType } : {}),
     }, {
       signal: options.signal,
       telemetry,

@@ -446,6 +446,7 @@ export const executeStructuredContentWritingWorkflow = async (
     processOutput?: (output: string) => { output: string; metadata?: JsonObject };
     invalidOutputRetryLimit?: number;
     invalidOutputRetrySuffix?: string;
+    responseMimeType?: 'application/json';
   }): Promise<StepRunResult> => {
     const definition = optionsForStep.definition;
     const existing = stepMap.get(definition.key) || await ensureStep(definition);
@@ -491,6 +492,7 @@ export const executeStructuredContentWritingWorkflow = async (
         includeGenerationRequestInHistory: true,
         articleContextOverride: optionsForStep.articleContextOverride,
         maxOutputTokens: optionsForStep.maxOutputTokens,
+        responseMimeType: optionsForStep.responseMimeType,
         signal: options.signal,
         onProgress: progress => emitProgress(definition, optionsForStep.stepIndex, optionsForStep.stepCount, {
           ...progress,
@@ -990,72 +992,176 @@ export const executeStructuredContentWritingWorkflow = async (
         processOutput: processKnowledgeOutput,
         invalidOutputRetryLimit: 1,
         invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+        responseMimeType: 'application/json',
       })),
     );
-    const failedKnowledgePass = knowledgePassResults.find(
+    const successfulKnowledgePasses = knowledgePassResults.filter(
+      (result): result is Extract<StepRunResult, { ok: true }> => result.ok,
+    );
+    const failedKnowledgePasses = knowledgePassResults.filter(
       (result): result is Extract<StepRunResult, { ok: false }> => !result.ok,
     );
-    if (failedKnowledgePass) return failedKnowledgePass.execution;
-    const firstPassResult = knowledgePassResults[0] as Extract<StepRunResult, { ok: true }>;
-    const secondPassResult = knowledgePassResults[1] as Extract<StepRunResult, { ok: true }>;
-    const firstPass = normalizeContentWritingKnowledgeBase(
-      firstPassResult.step.metadata?.knowledge || firstPassResult.output,
-      competitorChunks,
-    );
-    const secondPass = normalizeContentWritingKnowledgeBase(
-      secondPassResult.step.metadata?.knowledge || secondPassResult.output,
-      competitorChunks,
-    );
-    competitorIndexResult = await runStep({
-      definition: {
-        ...competitorIndexDefinition,
-        title: 'Reconciled competitor coverage and claim ledger',
-        metadata: {
-          ...competitorIndexDefinition.metadata,
-          ensemblePhase: 'reconciliation',
-          extractionPassStepKeys: knowledgePassDefinitions.map(definition => definition.key),
-        },
-      },
-      prompt: buildContentWritingKnowledgeReconciliationPrompt({
-        firstPass,
-        secondPass,
-        chunks: competitorChunks,
-        language: article.language,
-        template: promptTemplate(PROMPT_TEMPLATE_IDS.knowledgeReconciliation),
-      }),
-      stepIndex: competitorIndexDefinition.ordinal,
-      stepCount: 2,
-      maxOutputTokens: 20_000,
-      invalidOutputRetryLimit: 1,
-      invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
-      processOutput: output => {
-        const processed = processKnowledgeOutput(output);
-        const finalKnowledge = normalizeContentWritingKnowledgeBase(
-          processed.metadata?.knowledge || output,
-          competitorChunks,
-        );
-        const knowledgeEnsemble: ContentWritingKnowledgeEnsembleSummary = (
-          buildContentWritingKnowledgeEnsembleSummary({
-            firstPass,
-            secondPass,
-            finalKnowledge,
-            chunks: competitorChunks,
-          })
-        );
-        if (!knowledgeEnsemble.allChunksAccountedFor) {
-          throw new Error('The reconciled knowledge index did not account for every source chunk.');
+    const interruptedKnowledgePass = failedKnowledgePasses.find(result => (
+      result.execution.status === 499
+      || result.execution.errorCode === 'content_writing_cancelled'
+    ));
+    if (interruptedKnowledgePass) return interruptedKnowledgePass.execution;
+    if (successfulKnowledgePasses.length === 0) {
+      return failedKnowledgePasses[0]?.execution || createWorkflowFailure({
+        session: options.session,
+        status: 422,
+        code: 'content_writing_competitor_index_invalid',
+        message: 'Both competitor knowledge readings failed to produce a usable index.',
+        step: competitorIndexDefinition,
+      });
+    }
+
+    if (successfulKnowledgePasses.length === 1) {
+      const successfulPass = successfulKnowledgePasses[0];
+      const successfulPassDefinition = knowledgePassDefinitions.find(
+        definition => definition.key === successfulPass.step.step_key,
+      ) || knowledgePassDefinitions[0];
+      const failedPassDiagnostics = failedKnowledgePasses.map((result, index) => ({
+        stepKey: knowledgePassDefinitions.find(definition => (
+          definition.key !== successfulPass.step.step_key
+        ))?.key || `competitor-index-pass-${index + 1}`,
+        status: result.execution.status,
+        errorCode: result.execution.errorCode || 'content_writing_step_failed',
+        errorMessage: result.execution.errorMessage || 'The knowledge reading failed.',
+        requestCount: Number(result.execution.metadata?.requestCount || 0),
+        outputValidationRetryCount: Number(
+          result.execution.metadata?.outputValidationRetryCount || 0,
+        ),
+      }));
+      const startedFallback = await startContentWritingStep({
+        sessionId: options.session.id,
+        workerId: options.workerId,
+        stepKey: competitorIndexDefinition.key,
+        promptText: `Use the valid ${successfulPassDefinition.title} result because the other independent reading did not return a usable structured index.`,
+      });
+      if (!startedFallback) {
+        const latest = (await getContentWritingSteps(
+          options.session.id,
+          { includeContent: true, includeMetadata: true },
+        )).find(step => step.step_key === competitorIndexDefinition.key);
+        if (latest?.status === 'completed' && toText(latest.output_text)) {
+          stepMap.set(competitorIndexDefinition.key, latest);
+          competitorIndexResult = {
+            ok: true,
+            step: latest,
+            output: toText(latest.output_text),
+          };
+        } else {
+          throw new Error('Could not start the competitor knowledge fallback step.');
         }
-        return {
-          ...processed,
+      } else {
+        stepMap.set(competitorIndexDefinition.key, startedFallback);
+        const completedFallback = await completeContentWritingStep({
+          sessionId: options.session.id,
+          workerId: options.workerId,
+          stepKey: competitorIndexDefinition.key,
+          outputText: successfulPass.output,
           metadata: {
-            ...(processed.metadata || {}),
-            knowledge: finalKnowledge,
-            knowledgeEnsemble,
+            ...(successfulPass.step.metadata || {}),
+            workflowVersion: CONTENT_WRITING_WORKFLOW_VERSION,
+            knowledgeExtractionFallback: {
+              status: 'degraded_single_pass',
+              usedPassStepKey: successfulPass.step.step_key,
+              usedPassTitle: successfulPassDefinition.title,
+              failedPasses: failedPassDiagnostics,
+              messageAr: 'تم اعتماد القراءة الصحيحة ومتابعة الكتابة لأن القراءة الأخرى لم تُرجع JSON صالحًا بعد إعادة محاولتها.',
+              messageEn: 'Writing continued with the valid reading because the other reading did not return valid JSON after its retry.',
+            },
             extractionPassStepKeys: knowledgePassDefinitions.map(definition => definition.key),
           },
+        });
+        if (!completedFallback) {
+          throw new Error('Could not complete the competitor knowledge fallback step.');
+        }
+        stepMap.set(competitorIndexDefinition.key, completedFallback);
+        emitProgress(
+          competitorIndexDefinition,
+          competitorIndexDefinition.ordinal,
+          2,
+          {
+            stage: 'workflow-knowledge-fallback',
+            provider: options.session.provider,
+            model: options.session.model,
+            message: 'Continued with the valid competitor knowledge reading; the failed reading was not rerun with the successful one.',
+            degraded: true,
+            completed: false,
+          },
+        );
+        competitorIndexResult = {
+          ok: true,
+          step: completedFallback,
+          output: successfulPass.output,
+          execution: successfulPass.execution,
         };
-      },
-    });
+      }
+    } else {
+      const firstPassResult = knowledgePassResults[0] as Extract<StepRunResult, { ok: true }>;
+      const secondPassResult = knowledgePassResults[1] as Extract<StepRunResult, { ok: true }>;
+      const firstPass = normalizeContentWritingKnowledgeBase(
+        firstPassResult.step.metadata?.knowledge || firstPassResult.output,
+        competitorChunks,
+      );
+      const secondPass = normalizeContentWritingKnowledgeBase(
+        secondPassResult.step.metadata?.knowledge || secondPassResult.output,
+        competitorChunks,
+      );
+      competitorIndexResult = await runStep({
+        definition: {
+          ...competitorIndexDefinition,
+          title: 'Reconciled competitor coverage and claim ledger',
+          metadata: {
+            ...competitorIndexDefinition.metadata,
+            ensemblePhase: 'reconciliation',
+            extractionPassStepKeys: knowledgePassDefinitions.map(definition => definition.key),
+          },
+        },
+        prompt: buildContentWritingKnowledgeReconciliationPrompt({
+          firstPass,
+          secondPass,
+          chunks: competitorChunks,
+          language: article.language,
+          template: promptTemplate(PROMPT_TEMPLATE_IDS.knowledgeReconciliation),
+        }),
+        stepIndex: competitorIndexDefinition.ordinal,
+        stepCount: 2,
+        maxOutputTokens: 20_000,
+        invalidOutputRetryLimit: 1,
+        invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+        responseMimeType: 'application/json',
+        processOutput: output => {
+          const processed = processKnowledgeOutput(output);
+          const finalKnowledge = normalizeContentWritingKnowledgeBase(
+            processed.metadata?.knowledge || output,
+            competitorChunks,
+          );
+          const knowledgeEnsemble: ContentWritingKnowledgeEnsembleSummary = (
+            buildContentWritingKnowledgeEnsembleSummary({
+              firstPass,
+              secondPass,
+              finalKnowledge,
+              chunks: competitorChunks,
+            })
+          );
+          if (!knowledgeEnsemble.allChunksAccountedFor) {
+            throw new Error('The reconciled knowledge index did not account for every source chunk.');
+          }
+          return {
+            ...processed,
+            metadata: {
+              ...(processed.metadata || {}),
+              knowledge: finalKnowledge,
+              knowledgeEnsemble,
+              extractionPassStepKeys: knowledgePassDefinitions.map(definition => definition.key),
+            },
+          };
+        },
+      });
+    }
   } else {
     competitorIndexResult = await runStep({
       definition: competitorIndexDefinition,
@@ -1072,6 +1178,7 @@ export const executeStructuredContentWritingWorkflow = async (
       processOutput: processKnowledgeOutput,
       invalidOutputRetryLimit: 1,
       invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+      responseMimeType: 'application/json',
     });
   }
   if (!competitorIndexResult.ok) return competitorIndexResult.execution;

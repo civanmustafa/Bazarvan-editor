@@ -89,8 +89,14 @@ const stageInputExplanation = (
   isArabic: boolean,
 ): string[] => {
   if (step.stepType === 'competitor_index') {
+    const extractionFallback = isRecord(step.metadata.knowledgeExtractionFallback)
+      ? step.metadata.knowledgeExtractionFallback
+      : null;
     return isArabic
       ? [
+          ...(extractionFallback
+            ? ['تعذرت إحدى قراءتي المنافسين بعد إعادة محاولتها، لذلك حُفظت القراءة الصحيحة واستمر سير الكتابة بها بدل إيقاف المقالة أو إعادة القراءة الناجحة.']
+            : []),
           step.metadata.knowledgeEnsemble
             ? 'جميع مقتطفات المنافسين المتاحة أُرسلت إلى «القراءة الشاملة المباشرة» و«قراءة صيد الثغرات»، ثم صولح بين النتيجتين في طلب ثالث باتحاد الأفكار المدعومة.'
             : 'جميع مقتطفات المنافسين المتاحة تُرسل لبناء مصفوفة المعرفة وسجل المصادر والادعاءات.',
@@ -98,6 +104,9 @@ const stageInputExplanation = (
           'العبارات المهمة إشارات لتغطية الموضوع وليست نصوصًا مطلوب نسخها حرفيًا.',
         ]
       : [
+          ...(extractionFallback
+            ? ['One competitor reading remained invalid after its retry, so the valid reading was preserved and writing continued without rerunning it.']
+            : []),
           step.metadata.knowledgeEnsemble
             ? 'Every available competitor excerpt was sent through two independent readings, then reconciled in a third request as an evidence-backed union.'
             : 'All available competitor excerpts are sent to build the knowledge matrix, source registry, and claims ledger.',
