@@ -461,6 +461,62 @@ test('an automatic retry discovers a newly saved paid key and uses its recovery 
   assert.equal(state.calls[1].options.credentialPurpose, 'content_writing_resume');
 });
 
+test('an invalid structured free response can retry directly through the configured paid recovery route', async () => {
+  const state = createFixture();
+  state.calls = [];
+  state.routing = {
+    contentWritingProvider: 'gemini',
+    automaticContentWritingProvider: 'system',
+    freeFirstFallbackEnabled: true,
+    paidFallbackProvider: 'geminiPaid',
+  };
+  state.capabilities = {
+    providers: {
+      gemini: { enabled: true, configured: true, available: true, model: 'gemini-free-model' },
+      geminiPaid: { enabled: true, configured: true, available: true, model: 'gemini-paid-model' },
+      openai: { enabled: false, configured: false, available: false, model: 'openai-model' },
+    },
+  };
+  const engine = await loadRuntime('server/contentWritingEngine.ts', state, {
+    aiProviderCapabilities: 'export const readAiProviderCapabilities = async () => s.capabilities;',
+    userAiRoutingPreferences: 'export const readUserAiRoutingPreferences = async () => s.routing;',
+    providerAccessControl: 'export const resolveEffectiveProviderPolicy = async () => ({ allowProviderFallback: true });',
+    aiExecutionEngine: `export const aiExecutionEngine = { executeGemini: async (input, options) => {
+      s.calls.push({ input, options }); return { status: 200, body: { text: 'Paid structured response', model: input.model } };
+    } }; export const sanitizeAiExecutionResult = value => value;`,
+    openAiExecutionEngine: 'export const executeOpenAiRequest = async () => ({ status: 500, body: {} });',
+  });
+  const result = await engine.executeContentWritingTurn({
+    session: {
+      id: 'session-1', article_id: 'article-1', created_by: 'creator-a',
+      provider: 'gemini', model: 'gemini-free-model',
+      context_snapshot: {
+        triggerSource: 'automatic_ready',
+        providerRouting: {
+          mode: 'free_first',
+          paidFallbackProvider: 'geminiPaid',
+          paidFallbackModel: 'gemini-paid-model',
+        },
+      },
+      progress: { resumed: true },
+    },
+    messages: [
+      { sequence_number: 1, stage: 'instructions', role: 'system', content: 'Instructions' },
+      { sequence_number: 2, stage: 'article_context', role: 'user', content: 'Context' },
+      { sequence_number: 3, stage: 'generation_request', role: 'user', content: 'Write' },
+    ],
+    prompt: 'Repair the invalid structured response',
+    stepKey: 'faq',
+    stepLabel: 'FAQ',
+    stepAttempt: 2,
+    preferPaidFallback: true,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.text, 'Paid structured response');
+  assert.deepEqual(state.calls.map((call: any) => call.input.provider), ['geminiPaid']);
+  assert.equal(state.calls[0].options.credentialPurpose, 'content_writing_resume');
+});
+
 test('resumed writing restores frozen source instructions once for old, current, and overridden contexts', async () => {
   const state = createFixture();
   state.calls = [];

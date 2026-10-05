@@ -749,6 +749,7 @@ export const executeContentWritingTurn = async (options: {
   additionalHistory?: ContentWritingTurnHistory[];
   maxOutputTokens?: number;
   responseMimeType?: 'application/json';
+  preferPaidFallback?: boolean;
   signal?: AbortSignal;
   onProgress?: (progress: AiExecutionProgress) => void;
 }): Promise<ContentWritingExecutionResult> => {
@@ -877,30 +878,44 @@ export const executeContentWritingTurn = async (options: {
     && routing.mode === 'free_first'
     && (routing.paidFallbackProvider === 'geminiPaid' || routing.paidFallbackProvider === 'openai')
     && toText(routing.paidFallbackModel);
-  const primaryResult = await runProvider(
-    options.session.provider,
-    options.session.model,
-    !freeFirst,
-  );
-  let rawResult = primaryResult;
-  if (freeFirst && shouldAttemptAiFallback(primaryResult)) {
+  const runConfiguredPaidFallback = async () => {
     const primaryPolicy = await resolveEffectiveProviderPolicy(
       options.session.created_by,
       'gemini_free',
     );
-    if (primaryPolicy.allowProviderFallback) {
-      const paidFallbackProvider = routing.paidFallbackProvider as 'geminiPaid' | 'openai';
-      const fallbackResult = await runProvider(
-        paidFallbackProvider,
-        toText(routing.paidFallbackModel),
-        false,
-        'content_writing_resume',
-      );
-      rawResult = mergeProviderFallbackResult({
-        previous: primaryResult,
-        next: fallbackResult,
-        requestedProvider: 'gemini',
-      });
+    if (!primaryPolicy.allowProviderFallback) return null;
+    const paidFallbackProvider = routing.paidFallbackProvider as 'geminiPaid' | 'openai';
+    return runProvider(
+      paidFallbackProvider,
+      toText(routing.paidFallbackModel),
+      false,
+      'content_writing_resume',
+    );
+  };
+  let rawResult;
+  if (freeFirst && options.preferPaidFallback === true) {
+    // A syntactically successful free response can still be unusable (for
+    // example malformed structured FAQ output). Once validation requests a
+    // retry, use the explicitly configured paid recovery route instead of
+    // repeatedly spending the same free route and failing at the same stage.
+    rawResult = await runConfiguredPaidFallback()
+      || await runProvider(options.session.provider, options.session.model, false);
+  } else {
+    const primaryResult = await runProvider(
+      options.session.provider,
+      options.session.model,
+      !freeFirst,
+    );
+    rawResult = primaryResult;
+    if (freeFirst && shouldAttemptAiFallback(primaryResult)) {
+      const fallbackResult = await runConfiguredPaidFallback();
+      if (fallbackResult) {
+        rawResult = mergeProviderFallbackResult({
+          previous: primaryResult,
+          next: fallbackResult,
+          requestedProvider: 'gemini',
+        });
+      }
     }
   }
   const publicResult = options.session.provider === 'openai'

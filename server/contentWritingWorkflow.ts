@@ -493,6 +493,7 @@ export const executeStructuredContentWritingWorkflow = async (
         articleContextOverride: optionsForStep.articleContextOverride,
         maxOutputTokens: optionsForStep.maxOutputTokens,
         responseMimeType: optionsForStep.responseMimeType,
+        preferPaidFallback: retryNumber > 0,
         signal: options.signal,
         onProgress: progress => emitProgress(definition, optionsForStep.stepIndex, optionsForStep.stepCount, {
           ...progress,
