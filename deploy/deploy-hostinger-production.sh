@@ -82,7 +82,7 @@ set -a
 source .env.production
 set +a
 
-BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=156 \
+BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=157 \
   bash deploy/hostinger-supabase/apply-project-migrations.sh
 
 npm ci --include=dev
@@ -152,7 +152,7 @@ from (
 select public.release_recoverable_automatic_focus_stalls(50);
 SQL
 
-EXPECTED_MIGRATIONS=156 \
+EXPECTED_MIGRATIONS=157 \
   bash deploy/hostinger-supabase/verify-project-schema.sh
 
 wait_for_endpoint() {

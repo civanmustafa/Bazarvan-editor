@@ -51,6 +51,20 @@ test('content-writing migration persists idempotent sessions and exactly three i
   assertBalancedSqlParentheses(migration);
 });
 
+test('explicitly resumed writing sessions do not reconcile into their superseded automation run', async () => {
+  const migration = await readWorkspaceFile(
+    'supabase/migrations/20261101000000_explicit_writing_resume_terminal_status.sql',
+  );
+
+  assert.match(migration, /create or replace function public\.sync_content_writing_automation_session\(\)/);
+  assert.match(
+    migration,
+    /coalesce\(new\.context_snapshot ->> 'triggerSource', ''\) <> 'automatic_ready'/,
+  );
+  assert.match(migration, /perform public\.reconcile_content_writing_automation_session\(v_item_id, new\.id\)/);
+  assertBalancedSqlParentheses(migration);
+});
+
 test('structured content-writing migration persists resumable steps without API secrets', async () => {
   const migration = await readWorkspaceFile(
     'supabase/migrations/20260722010000_structured_content_writing.sql',
@@ -332,6 +346,11 @@ test('content-writing engine owns server-side context assembly and structured pr
   assert.match(workflow, /workflow-step-output-retry/);
   assert.match(workflow, /invalidOutputRetryLimit: 1/);
   assert.match(workflow, /CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX/);
+  assert.match(workflow, /invalidOutputRetryLimit: candidateOptions\.invalidOutputRetryLimit/);
+  assert.match(
+    workflow,
+    /const faqResult = await runCandidateStage\([\s\S]*?invalidOutputRetryLimit: 1,[\s\S]*?responseMimeType: 'application\/json'/,
+  );
   assert.match(workflow, /structuralJsonRepairApplied/);
   assert.match(workflow, /buildContentWritingCoverageAuditPrompt/);
   assert.match(workflow, /section-repair-/);
@@ -421,6 +440,7 @@ test('content-writing review requires explicit approval and uses the central edi
   assert.match(panel, /model: selectedModel/);
   assert.doesNotMatch(panel, /setProvider\(selectedSession\.provider\)/);
   assert.match(panel, /aiProviderCapabilities\.contentWriting\.resumeModel/);
+  assert.match(panel, /aiProviderCapabilities\.contentWriting\.providers \|\| aiProviderCapabilities\.providers/);
   assert.match(panel, /سيُستأنف تنفيذ المراحل المتبقية باستخدام/);
   assert.match(panel, /recoverContentWritingDraft/);
   assert.match(panel, /المسودة الجزئية المستردة/);

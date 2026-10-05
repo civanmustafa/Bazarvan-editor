@@ -78,7 +78,7 @@ test('automation status visibility follows article assignment regardless of view
   const article = {
     ownerId: 'owner-id',
     createdBy: 'creator-id',
-    assignedTo: null,
+    assignedTo: null as string | null,
     metadata: {
       n8nSettings: {
         visibleToEmailsCsv: 'legacy-viewer@example.com',

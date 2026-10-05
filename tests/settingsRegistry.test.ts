@@ -334,7 +334,13 @@ test('SettingsRegistry validates system settings and discards unknown fields', a
 test('AI capabilities expose an optional normalized content-writing resume model', async () => {
   const capabilities = await importAiProviderCapabilities();
   const normalized = capabilities.normalizeAiProviderCapabilities({
+    providers: {
+      geminiPaid: { enabled: true, configured: false, model: 'gemini-standard' },
+    },
     contentWriting: {
+      providers: {
+        geminiPaid: { enabled: true, configured: true, model: 'gemini-resume' },
+      },
       resumeModel: { provider: 'openai', model: '  gpt-4.1-mini  ' },
     },
   });
@@ -342,6 +348,9 @@ test('AI capabilities expose an optional normalized content-writing resume model
     provider: 'openai',
     model: 'gpt-4.1-mini',
   });
+  assert.equal(normalized.providers.geminiPaid.available, false);
+  assert.equal(normalized.contentWriting.providers!.geminiPaid.available, true);
+  assert.equal(normalized.contentWriting.providers!.geminiPaid.model, 'gemini-resume');
   assert.equal(
     capabilities.normalizeAiProviderCapabilities({
       contentWriting: { resumeModel: { provider: 'invalid', model: 'x' } },

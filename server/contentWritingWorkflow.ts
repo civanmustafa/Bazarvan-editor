@@ -634,6 +634,9 @@ export const executeStructuredContentWritingWorkflow = async (
     maxOutputTokens: number;
     articleContextOverride?: string;
     processOutput?: (output: string) => ProcessedStepOutput;
+    invalidOutputRetryLimit?: number;
+    invalidOutputRetrySuffix?: string;
+    responseMimeType?: 'application/json';
     evaluate: (
       result: Extract<StepRunResult, { ok: true }>,
       candidateIndex: number,
@@ -770,6 +773,9 @@ export const executeStructuredContentWritingWorkflow = async (
         maxOutputTokens: candidateOptions.maxOutputTokens,
         articleContextOverride: candidateOptions.articleContextOverride,
         processOutput: candidateOptions.processOutput,
+        invalidOutputRetryLimit: candidateOptions.invalidOutputRetryLimit,
+        invalidOutputRetrySuffix: candidateOptions.invalidOutputRetrySuffix,
+        responseMimeType: candidateOptions.responseMimeType,
       });
     };
 
@@ -1217,6 +1223,9 @@ export const executeStructuredContentWritingWorkflow = async (
     stepCount: 2,
     maxOutputTokens: 6_000,
     articleContextOverride: compactArticleContext,
+    invalidOutputRetryLimit: 1,
+    invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+    responseMimeType: 'application/json',
     processOutput: output => {
       const parsedOutline = parseContentWritingOutline(output);
       const policyOutline = qualityRuntime
@@ -1455,6 +1464,9 @@ export const executeStructuredContentWritingWorkflow = async (
     stepCount: definitions.length,
     maxOutputTokens: 6_000,
     articleContextOverride: compactArticleContext,
+    invalidOutputRetryLimit: 1,
+    invalidOutputRetrySuffix: CONTENT_WRITING_JSON_OUTPUT_RETRY_SUFFIX,
+    responseMimeType: 'application/json',
     processOutput: output => {
       const audit = normalizeContentWritingFaqAudit({
         value: output,

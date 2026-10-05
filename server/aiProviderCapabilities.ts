@@ -35,6 +35,9 @@ export const readAiProviderCapabilities = async (
   const storedAi = isRecord(data?.value) ? data.value : {};
   const settings = normalizeSystemSettingsMap({ ai: storedAi }).ai;
   const credentialAvailability = await readAiProviderCredentialAvailability(userId, credentialPurpose);
+  const contentWritingCredentialAvailability = credentialPurpose === 'content_writing_resume'
+    ? credentialAvailability
+    : await readAiProviderCredentialAvailability(userId, 'content_writing_resume');
   const resumeModel = parseContentWritingResumeModel(settings.contentWritingResumeModel);
 
   return normalizeAiProviderCapabilities({
@@ -62,6 +65,28 @@ export const readAiProviderCapabilities = async (
     },
     defaultProvider: settings.defaultProvider || defaults.defaultProvider,
     contentWriting: {
+      providers: {
+        gemini: {
+          enabled: settings.geminiFreeEnabled !== false,
+          configured: contentWritingCredentialAvailability.gemini.configured,
+          model: String(settings.defaultGeminiModel || process.env.GEMINI_MODEL || GEMINI_ANALYSIS_MODEL),
+        },
+        geminiPaid: {
+          enabled: settings.geminiProEnabled !== false,
+          configured: contentWritingCredentialAvailability.geminiPaid.configured,
+          model: String(
+            settings.defaultGeminiPaidModel
+            || process.env.GEMINI_PAID_MODEL
+            || process.env.GEMINI_PRO_MODEL
+            || GEMINI_PAID_ANALYSIS_MODEL
+          ),
+        },
+        openai: {
+          enabled: settings.openAiEnabled === true,
+          configured: contentWritingCredentialAvailability.openai.configured,
+          model: String(settings.defaultOpenAiModel || process.env.OPENAI_MODEL || OPENAI_ANALYSIS_MODEL),
+        },
+      },
       qualityOverrideReasonRequired:
         settings.contentWritingQualityOverrideReasonRequired !== false,
       competitorPhraseIntelligenceEnabled:

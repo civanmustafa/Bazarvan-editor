@@ -19,6 +19,7 @@ export type AiProviderCapabilities = {
   providers: Record<AiRuntimeProvider, AiProviderCapability>;
   defaultProvider: AiRuntimeProvider;
   contentWriting: {
+    providers?: Record<AiRuntimeProvider, AiProviderCapability>;
     qualityOverrideReasonRequired: boolean;
     competitorPhraseIntelligenceEnabled: boolean;
     resumeModel: {
@@ -85,6 +86,26 @@ export const getDefaultAiProviderCapabilities = (): AiProviderCapabilities => ({
   },
   defaultProvider: 'gemini',
   contentWriting: {
+    providers: {
+      gemini: {
+        enabled: true,
+        configured: true,
+        available: true,
+        model: GEMINI_ANALYSIS_MODEL,
+      },
+      geminiPaid: {
+        enabled: true,
+        configured: true,
+        available: true,
+        model: GEMINI_PAID_ANALYSIS_MODEL,
+      },
+      openai: {
+        enabled: false,
+        configured: false,
+        available: false,
+        model: OPENAI_ANALYSIS_MODEL,
+      },
+    },
     qualityOverrideReasonRequired: true,
     competitorPhraseIntelligenceEnabled: true,
     resumeModel: null,
@@ -112,6 +133,18 @@ export const normalizeAiProviderCapabilities = (value: unknown): AiProviderCapab
   const resumeModel = typeof resumeModelSource?.model === 'string'
     ? resumeModelSource.model.trim().slice(0, 200)
     : '';
+  const contentWritingProvidersSource = isRecord(contentWritingSource.providers)
+    ? contentWritingSource.providers
+    : providersSource;
+  const contentWritingProviders = Object.fromEntries(
+    AI_RUNTIME_PROVIDER_ORDER.map(provider => [
+      provider,
+      normalizeCapability(
+        contentWritingProvidersSource[provider],
+        providers[provider],
+      ),
+    ]),
+  ) as Record<AiRuntimeProvider, AiProviderCapability>;
   const defaultProvider = AI_RUNTIME_PROVIDER_ORDER.includes(requestedDefault)
     && providers[requestedDefault].available
     ? requestedDefault
@@ -121,6 +154,7 @@ export const normalizeAiProviderCapabilities = (value: unknown): AiProviderCapab
     providers,
     defaultProvider,
     contentWriting: {
+      providers: contentWritingProviders,
       qualityOverrideReasonRequired:
         typeof contentWritingSource.qualityOverrideReasonRequired === 'boolean'
           ? contentWritingSource.qualityOverrideReasonRequired

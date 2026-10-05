@@ -338,8 +338,6 @@ const ContentWritingPanel: React.FC = () => {
     t,
     aiProviderCapabilities,
     chatGptOpenMode,
-    isAiProviderEnabled,
-    isAiProviderAvailable,
   } = useUser();
   const articleId = useEditorSelector(context => context.activeArticleId);
   const articleTitle = useEditorSelector(context => context.title);
@@ -361,9 +359,9 @@ const ContentWritingPanel: React.FC = () => {
     normalizeUserAiRoutingPreferences(getCachedUserPreferences().ai).contentWritingProvider
   ));
   const [modelByProvider, setModelByProvider] = useState<Record<ContentWritingProvider, string>>(() => ({
-    gemini: aiProviderCapabilities.providers.gemini.model,
-    geminiPaid: aiProviderCapabilities.providers.geminiPaid.model,
-    openai: aiProviderCapabilities.providers.openai.model,
+    gemini: (aiProviderCapabilities.contentWriting.providers || aiProviderCapabilities.providers).gemini.model,
+    geminiPaid: (aiProviderCapabilities.contentWriting.providers || aiProviderCapabilities.providers).geminiPaid.model,
+    openai: (aiProviderCapabilities.contentWriting.providers || aiProviderCapabilities.providers).openai.model,
   }));
   const [sessions, setSessions] = useState<ContentWritingSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
@@ -465,29 +463,32 @@ const ContentWritingPanel: React.FC = () => {
     return () => window.removeEventListener(AI_EXECUTION_ACTIVITY_EVENT, synchronizeActivity);
   }, [articleId]);
 
+  const contentWritingProviderCapabilities = (
+    aiProviderCapabilities.contentWriting.providers || aiProviderCapabilities.providers
+  );
   const providerConfigs = useMemo(() => ([
     {
       id: 'gemini' as const,
-      enabled: isAiProviderEnabled('gemini'),
-      available: isAiProviderAvailable('gemini'),
+      enabled: contentWritingProviderCapabilities.gemini.enabled,
+      available: contentWritingProviderCapabilities.gemini.available,
       label: 'Gemini مجاني',
       icon: Sparkles,
     },
     {
       id: 'geminiPaid' as const,
-      enabled: isAiProviderEnabled('geminiPaid'),
-      available: isAiProviderAvailable('geminiPaid'),
+      enabled: contentWritingProviderCapabilities.geminiPaid.enabled,
+      available: contentWritingProviderCapabilities.geminiPaid.available,
       label: 'Gemini مدفوع',
       icon: BadgeDollarSign,
     },
     {
       id: 'openai' as const,
-      enabled: isAiProviderEnabled('chatgpt'),
-      available: isAiProviderAvailable('chatgpt'),
+      enabled: contentWritingProviderCapabilities.openai.enabled,
+      available: contentWritingProviderCapabilities.openai.available,
       label: 'OpenAI API',
       icon: Wand2,
     },
-  ]), [isAiProviderAvailable, isAiProviderEnabled]);
+  ]), [contentWritingProviderCapabilities]);
 
   const visibleProviders = useMemo(
     () => providerConfigs.filter(item => item.enabled),
@@ -580,16 +581,16 @@ const ContentWritingPanel: React.FC = () => {
         providerId,
         touchedModelsRef.current.has(providerId)
           ? current[providerId]
-          : aiProviderCapabilities.providers[providerId].model,
+          : contentWritingProviderCapabilities[providerId].model,
       ]),
     ) as Record<ContentWritingProvider, string>);
     if (!providerTouchedRef.current) {
       const preferred = routingPreferences.contentWritingProvider;
-      setProvider(aiProviderCapabilities.providers[preferred].available
+      setProvider(contentWritingProviderCapabilities[preferred].available
         ? preferred
         : aiProviderCapabilities.defaultProvider);
     }
-  }, [aiProviderCapabilities, routingPreferences.contentWritingProvider]);
+  }, [aiProviderCapabilities.defaultProvider, contentWritingProviderCapabilities, routingPreferences.contentWritingProvider]);
 
   useEffect(() => {
     if (selectedProviderConfig?.enabled && selectedProviderConfig.available) return;
