@@ -194,7 +194,11 @@ test('all durable workers use adaptive polling and lightweight Realtime wake sig
     crawlerWorker,
     ecosystem,
     migration,
+    loadReductionMigration,
     deploymentEnvironment,
+    dashboard,
+    aiActivity,
+    externalResults,
   ] = await Promise.all([
     readWorkspaceFile('server/externalAnalysisWorker.ts'),
     readWorkspaceFile('server/aiJobWorker.ts'),
@@ -202,7 +206,11 @@ test('all durable workers use adaptive polling and lightweight Realtime wake sig
     readWorkspaceFile('server/clientPageCrawlWorker.ts'),
     readWorkspaceFile('ecosystem.config.cjs'),
     readWorkspaceFile('supabase/migrations/20260728020000_worker_queue_wake_signals.sql'),
+    readWorkspaceFile('supabase/migrations/20261102000000_reduce_automation_database_load.sql'),
     readWorkspaceFile('deploy/env.server.example'),
+    readWorkspaceFile('components/Dashboard.tsx'),
+    readWorkspaceFile('components/AiKeyUsageToast.tsx'),
+    readWorkspaceFile('components/ExternalAnalysisResultsTab.tsx'),
   ]);
 
   for (const workerSource of [externalWorker, aiWorker, writingWorker, crawlerWorker]) {
@@ -217,9 +225,14 @@ test('all durable workers use adaptive polling and lightweight Realtime wake sig
   assert.match(aiWorker, /queueName: 'ai_jobs'/);
   assert.match(writingWorker, /queueName: 'content_writing'/);
   assert.match(crawlerWorker, /queueName: 'client_page_crawl'/);
-  assert.equal((ecosystem.match(/^\s*[A-Z_]+IDLE_MAX_MS:/gm) || []).length, 7);
+  assert.equal((ecosystem.match(/^\s*[A-Z_]+IDLE_MAX_MS:/gm) || []).length, 4);
+  assert.match(ecosystem, /name: 'bazarvan-automation-worker'/);
+  assert.equal((ecosystem.match(/script: 'server-dist\/external-analysis-worker\.mjs'/g) || []).length, 1);
+  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_POLL_MS:[^\n]+\|\| '10000'/);
   assert.match(deploymentEnvironment, /AI_JOB_WORKER_IDLE_MAX_MS=30000/);
   assert.match(deploymentEnvironment, /CONTENT_WRITING_WORKER_IDLE_MAX_MS=30000/);
+  assert.match(deploymentEnvironment, /AI_JOB_WORKER_POLL_MS=10000/);
+  assert.match(deploymentEnvironment, /CONTENT_WRITING_WORKER_POLL_MS=10000/);
 
   assert.match(migration, /create table if not exists public\.worker_queue_signals/);
   assert.match(migration, /alter publication supabase_realtime add table public\.worker_queue_signals/);
@@ -232,4 +245,20 @@ test('all durable workers use adaptive polling and lightweight Realtime wake sig
   ]) {
     assert.match(migration, new RegExp(`on public\\.${queueTable}`));
   }
+
+  for (const indexName of [
+    'ai_external_analysis_jobs_worker_claim_idx',
+    'ai_external_analysis_jobs_worker_lease_idx',
+    'articles_automatic_writing_candidates_idx',
+    'content_writing_automation_items_active_claim_idx',
+  ]) {
+    assert.match(loadReductionMigration, new RegExp(indexName));
+  }
+  assert.match(loadReductionMigration, /alter publication supabase_realtime drop table/);
+  assert.doesNotMatch(loadReductionMigration, /drop table public\.worker_queue_signals/);
+  assert.doesNotMatch(dashboard, /dashboard-(content-writing|external-analysis)-/);
+  assert.doesNotMatch(aiActivity, /table: 'ai_external_analysis_jobs'/);
+  assert.doesNotMatch(externalResults, /table: 'ai_external_analysis_jobs'/);
+  assert.match(dashboard, /120_000/);
+  assert.match(externalResults, /hasActiveJobs \? 15_000 : 60_000/);
 });

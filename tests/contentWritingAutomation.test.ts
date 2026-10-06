@@ -321,8 +321,8 @@ test('Write article durably discovers and extracts competitor prose before queui
   assert.match(executor, /queueContentWritingSession/);
   assert.match(executor, /readCurrentPreparationIntent/);
   assert.match(worker, /contentWritingCompetitorPreparationExecutor/);
-  assert.match(ecosystem, /bazarvan-content-writing-preparation-worker/);
-  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'content_writing_preparation'/);
+  assert.match(ecosystem, /bazarvan-automation-worker/);
+  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES:[^\n]+content_writing_preparation/);
   assert.match(manualAPI, /action === 'getPreparation'/);
   assert.match(manualAPI, /preparingCompetitors: true/);
   assert.match(browserClient, /onPreparationProgress/);

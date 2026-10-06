@@ -59,18 +59,21 @@ if [[ ! -f .env.production ]]; then
   exit 1
 fi
 
-readonly PM2_APPS=(
+readonly AUTOMATION_APP="bazarvan-staging-automation-worker"
+readonly REQUIRED_PM2_APPS=(
   bazarvan-editor-staging
-  bazarvan-staging-competitor-worker
-  bazarvan-staging-ai-worker
-  bazarvan-staging-full-article-pipeline-worker
   bazarvan-staging-ai-job-worker
   bazarvan-staging-content-writing-worker
   bazarvan-staging-client-page-crawler
 )
-readonly CONTENT_WRITING_PREPARATION_APP="bazarvan-staging-content-writing-preparation-worker"
+readonly LEGACY_AUTOMATION_APPS=(
+  bazarvan-staging-competitor-worker
+  bazarvan-staging-ai-worker
+  bazarvan-staging-full-article-pipeline-worker
+  bazarvan-staging-content-writing-preparation-worker
+)
 
-for app_name in "${PM2_APPS[@]}"; do
+for app_name in "${REQUIRED_PM2_APPS[@]}"; do
   if ! pm2 describe "${app_name}" >/dev/null 2>&1; then
     echo "Required PM2 process is unavailable: ${app_name}" >&2
     exit 1
@@ -82,47 +85,62 @@ set -a
 source .env.production
 set +a
 
-BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=157 \
+BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=158 \
   bash deploy/hostinger-supabase/apply-project-migrations.sh
 
 npm ci --include=dev
 npm run build
 
-for app_name in "${PM2_APPS[@]}"; do
-  if [[ "${app_name}" == "bazarvan-staging-ai-worker" ]]; then
-    EXTERNAL_ANALYSIS_AUTOMATION_MASTER=true \
-      EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup \
-      pm2 restart "${app_name}" --update-env
-  elif [[ "${app_name}" == "bazarvan-staging-competitor-worker" \
-       || "${app_name}" == "bazarvan-staging-full-article-pipeline-worker" ]]; then
-    EXTERNAL_ANALYSIS_AUTOMATION_MASTER=false \
-      pm2 restart "${app_name}" --update-env
-  else
-    pm2 restart "${app_name}" --update-env
-  fi
-done
+pm2 restart bazarvan-editor-staging --update-env
 
-if pm2 describe "${CONTENT_WRITING_PREPARATION_APP}" >/dev/null 2>&1; then
-  EXTERNAL_ANALYSIS_AUTOMATION_MASTER=false \
-    pm2 restart "${CONTENT_WRITING_PREPARATION_APP}" --update-env
+AI_JOB_WORKER_POLL_MS=10000 \
+AI_JOB_WORKER_IDLE_MAX_MS=30000 \
+AI_JOB_WORKER_CONCURRENCY=1 \
+  pm2 restart bazarvan-staging-ai-job-worker --update-env
+
+CONTENT_WRITING_WORKER_POLL_MS=10000 \
+CONTENT_WRITING_WORKER_IDLE_MAX_MS=30000 \
+CONTENT_WRITING_WORKER_CONCURRENCY=1 \
+  pm2 restart bazarvan-staging-content-writing-worker --update-env
+
+CLIENT_PAGE_CRAWLER_POLL_MS=10000 \
+CLIENT_PAGE_CRAWLER_IDLE_MAX_MS=30000 \
+CLIENT_PAGE_CRAWLER_CONCURRENCY=1 \
+  pm2 restart bazarvan-staging-client-page-crawler --update-env
+
+if pm2 describe "${AUTOMATION_APP}" >/dev/null 2>&1; then
+  EXTERNAL_ANALYSIS_AUTOMATION_MASTER=true \
+  EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup,competitor_discovery,competitor_extraction,full_article_pipeline,content_writing_preparation \
+  EXTERNAL_ANALYSIS_WORKER_POLL_MS=10000 \
+  EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS=30000 \
+  EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS=1800 \
+  EXTERNAL_ANALYSIS_WORKER_CONCURRENCY=2 \
+    pm2 restart "${AUTOMATION_APP}" --update-env
 else
   NODE_ENV=production \
-  EXTERNAL_ANALYSIS_AUTOMATION_MASTER=false \
-  EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=content_writing_preparation \
-  EXTERNAL_ANALYSIS_WORKER_POLL_MS="${CONTENT_WRITING_PREPARATION_WORKER_POLL_MS:-5000}" \
-  EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS="${CONTENT_WRITING_PREPARATION_WORKER_IDLE_MAX_MS:-30000}" \
-  EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS="${CONTENT_WRITING_PREPARATION_LEASE_SECONDS:-1800}" \
+  EXTERNAL_ANALYSIS_AUTOMATION_MASTER=true \
+  EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup,competitor_discovery,competitor_extraction,full_article_pipeline,content_writing_preparation \
+  EXTERNAL_ANALYSIS_WORKER_POLL_MS=10000 \
+  EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS=30000 \
+  EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS=1800 \
   EXTERNAL_ANALYSIS_RETRY_MINUTES="${EXTERNAL_ANALYSIS_RETRY_MINUTES:-30}" \
   EXTERNAL_ANALYSIS_MAX_RETRY_COUNT="${EXTERNAL_ANALYSIS_MAX_RETRY_COUNT:-5}" \
-  EXTERNAL_ANALYSIS_WORKER_CONCURRENCY=1 \
+  EXTERNAL_ANALYSIS_WORKER_CONCURRENCY=2 \
     pm2 start server-dist/external-analysis-worker.mjs \
-      --name "${CONTENT_WRITING_PREPARATION_APP}" \
+      --name "${AUTOMATION_APP}" \
       --cwd "${APP_DIR}" \
       --restart-delay 2000 \
       --kill-timeout 15000
 fi
 
-pm2 describe "${CONTENT_WRITING_PREPARATION_APP}" >/dev/null
+pm2 describe "${AUTOMATION_APP}" >/dev/null
+
+# Retire only the four exact legacy processes after the unified worker is up.
+for app_name in "${LEGACY_AUTOMATION_APPS[@]}"; do
+  if pm2 describe "${app_name}" >/dev/null 2>&1; then
+    pm2 delete "${app_name}"
+  fi
+done
 pm2 save
 
 # A migration can revive competitor-discovery rows while the previous worker
@@ -152,7 +170,7 @@ from (
 select public.release_recoverable_automatic_focus_stalls(50);
 SQL
 
-EXPECTED_MIGRATIONS=157 \
+EXPECTED_MIGRATIONS=158 \
   bash deploy/hostinger-supabase/verify-project-schema.sh
 
 wait_for_endpoint() {

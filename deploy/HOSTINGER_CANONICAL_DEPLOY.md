@@ -13,6 +13,17 @@ Supabase Cloud، وحُفظت قائمة PM2 الجديدة عبر `pm2 save`. �
 عبارة **Supabase SQL Editor** في هذا الدليل تعني قاعدة Supabase الذاتية على VPS،
 وليس مشروع Cloud.
 
+## توحيد عامل الأتمتة وتقليل حمل Supabase (2026-11-02)
+
+طبّق `supabase/migrations/20261102000000_reduce_automation_database_load.sql`.
+أصبح العدد المتوقع 158 ترحيلًا. يشغّل PM2 عملية أتمتة خارجية واحدة باسم
+`bazarvan-staging-automation-worker` بدل أربع عمليات متخصصة، مع مسارين داخليين
+فقط كي يتمكن المنسق من انتظار مهمته الفرعية دون توقف دائري. تبدأ فترات فحص
+الطوابير الخاملة من 10 ثوانٍ وتتدرج حتى 30 ثانية، وتوقظها قناة
+`worker_queue_signals` عند وصول عمل جديد. أضيفت فهارس جزئية لمسارات الحجز
+والاسترداد، وأزيلت جداول الطوابير من Realtime؛ تظل جداول التحرير التي تحتاج
+تحديثًا فوريًا منشورة كما هي.
+
 ## استقلال بحث المنافسين داخل عامل التنفيذ (2026-10-29)
 
 طبّق `supabase/migrations/20261029000000_independent_competitor_discovery_runtime.sql`
@@ -165,7 +176,7 @@ Supabase Cloud، وحُفظت قائمة PM2 الجديدة عبر `pm2 save`. �
 
 طبّق `supabase/migrations/20261009000000_unify_automation_master_and_truthful_queue_inventory.sql`
 قبل نشر التطبيق. أصبح العدد المتوقع 131 ترحيلًا مع بقاء 67 جدولًا عامًا.
-تشغّل عملية `bazarvan-staging-ai-worker` وحدها منسق إنشاء المهام والاسترداد،
+تشغّل عملية `bazarvan-staging-automation-worker` وحدها منسق إنشاء المهام والاسترداد،
 بينما تنفذ بقية العمال المتخصصة المهام المحجوزة فقط. يمنع قفل قاعدة البيانات
 تشغيل دورتين رئيسيتين متزامنتين حتى عند خطأ في إعداد PM2. كما أصبحت نافذة الطابور
 تعتمد الجاهزية والسياسة وحدود الاسترداد الحالية، وتعرض سبب الانتظار أو المراجعة
@@ -246,7 +257,7 @@ Supabase Cloud، وحُفظت قائمة PM2 الجديدة عبر `pm2 save`. �
 
 طبّق `supabase/migrations/20260928000000_external_duplicate_cleanup.sql` قبل تشغيل الإصدار الجديد.
 يسجل مهمة `duplicate_cleanup` في طابور التحليل الخارجي دون تعديل المقالة تلقائيًا.
-عامل `bazarvan-staging-ai-worker` ينفذ جميع الدفعات ويحفظ نقاط الاستئناف والاقتراحات.
+عامل `bazarvan-staging-automation-worker` ينفذ جميع الدفعات ويحفظ نقاط الاستئناف والاقتراحات.
 تدخل المهمة إلى الطابور بضغطة زر التصنيف؛ لا تستلزم بقاء المتصفح مفتوحًا ولا تعمل تلقائيًا عند فتح المقالة.
 أصبح العدد الحالي 120 ترحيلًا و64 جدولًا عامًا. تُضاف `duplicate_cleanup` إلى أنواع مهام عامل التحليل في سكربت النشر.
 
@@ -810,10 +821,7 @@ npm ci --include=dev
 npm run build
 for app in \
   bazarvan-editor-staging \
-  bazarvan-staging-competitor-worker \
-  bazarvan-staging-ai-worker \
-  bazarvan-staging-full-article-pipeline-worker \
-  bazarvan-staging-content-writing-preparation-worker \
+  bazarvan-staging-automation-worker \
   bazarvan-staging-ai-job-worker \
   bazarvan-staging-content-writing-worker \
   bazarvan-staging-client-page-crawler; do
@@ -831,22 +839,20 @@ curl -fsS https://smarteditor.bazarvan.com/readyz
 - `npm ci --include=dev`: يثبت الاعتماديات طبقًا لملف القفل، بما فيها أدوات البناء
   مثل Vite حتى مع تحميل `NODE_ENV=production` من ملف البيئة.
 - `npm run build`: يبني الواجهة والخادم والعوامل وينفّذ فحوص الإصدار.
-- حلقة `pm2 restart`: تعيد تشغيل عمليات النسخة الذاتية الثماني فقط مع متغيرات البيئة المحدثة؛ لا تستخدم `pm2 restart all`. ينشئ سكربت النشر عامل تجهيز منافسي كتابة المقالة تلقائيًا في أول نشر، ثم يعيد تشغيله في النشرات اللاحقة.
+- حلقة `pm2 restart`: تعيد تشغيل خادم الويب وعامل الأتمتة الموحد والعمال الثلاثة المستقلة فقط مع متغيرات البيئة المحدثة؛ لا تستخدم `pm2 restart all`.
 - `pm2 save`: يحفظ قائمة العمليات لكي تعود بعد إعادة تشغيل الخادم.
 - `/healthz`: يتحقق من أن خادم الويب يعمل.
 - `/readyz`: يتحقق أيضًا من بناء الإنتاج، ومخططات Supabase المطلوبة، ومفتاح التشفير. يعرض حالة عامل المنافسين داخل `checks.externalAnalysisWorker` ويضع `degraded: true` عند تعطل طابوره، لكنه لا يعيد HTTP 503 بسبب تأخر مهمة وحده حتى لا تدخل مراقبة هوستينجر وPM2 في حلقة إعادة تشغيل تقطع المهام.
 
 ## ملاحظات وتشخيص المشكلات
 
-- يشغّل PM2 خادم الويب والعمال السبعة الذاتيين من `/var/www/bazarvan-editor-staging`. هذا هو المسار المعتمد.
+- يشغّل PM2 خادم الويب وأربعة عمال ذاتيين من `/var/www/bazarvan-editor-staging`. هذا هو المسار المعتمد.
 - أسماء العمليات الحالية تبدأ بـ`bazarvan-editor-staging` و`bazarvan-staging-*`؛ لا تُعد تشغيل الأسماء القديمة.
 - لا تستخدم `/var/www/bazarvan-smarteditor` في تعليمات النشر المستقبلية إلا إذا أُعيد ضبط PM2 عمدًا للعمل منه.
 - إذا لم تكن حالة النشر واضحة، اعرض جميع العمليات بالأمر `pm2 status`.
 - لفحص خادم الويب استخدم `pm2 describe bazarvan-editor-staging`.
-- لفحص عامل البحث وسحب المنافسين المستقل عبر Firecrawl استخدم `pm2 describe bazarvan-staging-competitor-worker`، ولسجله استخدم `pm2 logs bazarvan-staging-competitor-worker --lines 100`.
-- يستخدم `bazarvan-staging-ai-worker` للتحليل الدلالي والأوامر الهندسية وكتابة وصف الميتا، لذلك لا تمنع أخطاء Gemini عامل Firecrawl من استلام مهام المنافسين.
-- إذا كان `/readyz` يعرض `degraded: true` و`checks.externalAnalysisWorker.ok: false` فخادم الويب جاهز، لكن ميزات البحث والسحب متدهورة ويجب فحص `bazarvan-staging-competitor-worker`. لا تعِد تشغيل خادم الويب تلقائيًا بسبب هذا التنبيه وحده.
+- لفحص الأتمتة والتحليل الدلالي والمنافسين والمنسقات استخدم `pm2 describe bazarvan-staging-automation-worker`، ولسجله استخدم `pm2 logs bazarvan-staging-automation-worker --lines 100`.
+- إذا كان `/readyz` يعرض `degraded: true` و`checks.externalAnalysisWorker.ok: false` فخادم الويب جاهز، لكن ميزات الأتمتة متدهورة ويجب فحص `bazarvan-staging-automation-worker`. لا تعِد تشغيل خادم الويب تلقائيًا بسبب هذا التنبيه وحده.
 - لفحص عامل كتابة المقالة استخدم `pm2 describe bazarvan-staging-content-writing-worker`.
-- لفحص عامل تجهيز المنافسين قبل كتابة المقالة استخدم `pm2 describe bazarvan-staging-content-writing-preparation-worker`.
 - لفحص عامل زحف صفحات العملاء استخدم `pm2 describe bazarvan-staging-client-page-crawler`.
 - عند فشل `/readyz` لا تعتبر النشر مكتملًا؛ راجع الترحيلات ومتغيرات البيئة وسجل العملية في PM2.

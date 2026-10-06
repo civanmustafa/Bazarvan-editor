@@ -906,7 +906,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
   const activeJobWarning = extractionQueueStalled
     ? isArabic
       ? 'تم حفظ المهمة، لكن عامل المنافسين لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل عامل المنافسين في هوستينجر، ثم أعد المحاولة.'
-      : 'The job was saved, but bazarvan-competitor-worker did not claim it within 90 seconds. Stop it, start the competitor worker on Hostinger, then retry.'
+      : 'The job was saved, but bazarvan-automation-worker did not claim it within 90 seconds. Check the unified automation worker on Hostinger, then retry.'
     : extractionWaitingForWorker
       ? isArabic
         ? 'تم حفظ المهمة في الطابور، ولم تبدأ خدمة السحب بعد.'
@@ -1039,7 +1039,7 @@ const CompetitorDiscoveryPanel: React.FC<CompetitorDiscoveryPanelProps> = ({
               : discoveryQueueStalled
                 ? (isArabic
                   ? 'تم حفظ مهمة بحث المنافسين، لكن عامل المنافسين لم يستلمها خلال 90 ثانية. أوقف المهمة، وشغّل عامل المنافسين في هوستينجر، ثم أعد المحاولة.'
-                  : 'The competitor search job was saved, but bazarvan-competitor-worker did not claim it within 90 seconds. Stop it, start the competitor worker on Hostinger, then retry.')
+                  : 'The competitor search job was saved, but bazarvan-automation-worker did not claim it within 90 seconds. Check the unified automation worker on Hostinger, then retry.')
               : discoveryWaitingForWorker
                 ? (isArabic
                   ? 'بانتظار عامل بحث المنافسين؛ لم يبدأ البحث الخارجي بعد.'

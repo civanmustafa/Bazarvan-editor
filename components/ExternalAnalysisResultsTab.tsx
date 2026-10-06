@@ -20,7 +20,7 @@ import { useUser } from '../contexts/UserContext';
 import { getExternalReadyCommandLabel } from '../constants/externalAnalysisCommands';
 import { COMPETITOR_COMPARISON_COMMAND_ID } from '../utils/competitorComparisonWorkflow';
 import { copyMarkdownToClipboard, parseMarkdownToHtml } from '../utils/editorUtils';
-import { getSupabaseClient, isSupabaseConfigured } from '../utils/supabaseClient';
+import { isSupabaseConfigured } from '../utils/supabaseClient';
 import {
   cancelExternalAnalysisJob,
   EXTERNAL_ANALYSIS_ACTIVE_STATUSES,
@@ -275,39 +275,10 @@ const ExternalAnalysisResultsTab: React.FC<ExternalAnalysisResultsTabProps> = ({
     if (!articleId || !isSupabaseConfigured) return;
     const hasActiveJobs = jobs.some(job => EXTERNAL_ANALYSIS_ACTIVE_STATUSES.includes(job.status));
     const intervalId = window.setInterval(() => {
-      void refreshJobs(false);
-    }, hasActiveJobs ? 6_000 : 30_000);
+      if (document.visibilityState === 'visible') void refreshJobs(false);
+    }, hasActiveJobs ? 15_000 : 60_000);
     return () => window.clearInterval(intervalId);
   }, [articleId, jobs, refreshJobs]);
-
-  useEffect(() => {
-    if (!articleId || !isSupabaseConfigured) return;
-    const supabase = getSupabaseClient();
-    let refreshTimer: number | null = null;
-    const channel = supabase
-      .channel(`external-analysis-results-${articleId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'ai_external_analysis_jobs',
-          filter: `article_id=eq.${articleId}`,
-        },
-        () => {
-          if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-          refreshTimer = window.setTimeout(() => {
-            refreshTimer = null;
-            void refreshJobs(false);
-          }, 300);
-        },
-      )
-      .subscribe();
-    return () => {
-      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      void supabase.removeChannel(channel);
-    };
-  }, [articleId, refreshJobs]);
 
   useEffect(() => {
     const orderedJobs = [...jobs].sort((left, right) => {

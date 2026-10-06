@@ -42,8 +42,8 @@ for (const marker of [
 }
 
 const ecosystem = await readFile(path.join(root, 'ecosystem.config.cjs'), 'utf8');
-if (!ecosystem.includes('bazarvan-full-article-pipeline-worker')) {
-  throw new Error('PM2 configuration is missing the dedicated full article pipeline worker.');
+if (!ecosystem.includes('bazarvan-automation-worker') || !ecosystem.includes('full_article_pipeline')) {
+  throw new Error('PM2 configuration is missing the unified automation worker pipeline executor.');
 }
 
 console.log(JSON.stringify({

@@ -124,8 +124,8 @@ test('full workflow is durable, ordered, cancellable, and applies only a reviewe
   assert.match(worker, /administratorRetryMinutes/);
   assert.match(budgetMigration, /provider_attempt_limit integer not null default 6/);
   assert.match(budgetMigration, /external_analysis_provider_attempt_limit_reached/);
-  assert.match(ecosystem, /name: 'bazarvan-full-article-pipeline-worker'/);
-  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'full_article_pipeline'/);
+  assert.match(ecosystem, /name: 'bazarvan-automation-worker'/);
+  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES:[^\n]+full_article_pipeline/);
   assert.match(ecosystem, /semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command/);
 
   assert.match(api, /action === 'full_pipeline'/);

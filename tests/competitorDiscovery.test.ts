@@ -411,9 +411,9 @@ test('automatic competitor discovery is durable, ordered after enabled semantic 
   assert.match(worker, /supportedJobTypes: workerJobTypes/);
   assert.match(worker, /reason=\$\{retry\.code\}/);
   assert.match(worker, /retry\.message\.replace\(\/\\s\+\/g/);
-  assert.match(ecosystem, /name: 'bazarvan-competitor-worker'/);
-  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'competitor_discovery,competitor_extraction'/);
-  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup'/);
+  assert.match(ecosystem, /name: 'bazarvan-automation-worker'/);
+  assert.match(ecosystem, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES:[^\n]+competitor_discovery,competitor_extraction/);
+  assert.equal((ecosystem.match(/external-analysis-worker\.mjs/g) || []).length, 1);
   assert.match(panel, /getPersistedCompetitorDiscovery/);
   assert.doesNotMatch(panel, /ensureArticleCompetitorDiscovery/);
   assert.match(card, /بحث المنافسين/);

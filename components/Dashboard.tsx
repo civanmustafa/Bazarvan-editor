@@ -1517,8 +1517,8 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     void refreshActivitySummary();
     const intervalId = window.setInterval(() => {
-      void refreshActivitySummary(true);
-    }, 60_000);
+      if (document.visibilityState === 'visible') void refreshActivitySummary(true);
+    }, 120_000);
     return () => window.clearInterval(intervalId);
   }, [refreshActivitySummary]);
 
@@ -1859,8 +1859,8 @@ const Dashboard: React.FC = () => {
     if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0) return;
 
     const intervalId = window.setInterval(() => {
-      void refreshExternalAnalysisSummaries();
-    }, 20_000);
+      if (document.visibilityState === 'visible') void refreshExternalAnalysisSummaries();
+    }, 30_000);
     return () => window.clearInterval(intervalId);
   }, [currentUser, dashboardArticleIdsKey, refreshExternalAnalysisSummaries]);
 
@@ -1869,58 +1869,10 @@ const Dashboard: React.FC = () => {
     if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0 || isTrashVisible) return;
 
     const intervalId = window.setInterval(() => {
-      void refreshContentWritingSummaries();
-    }, 20_000);
+      if (document.visibilityState === 'visible') void refreshContentWritingSummaries();
+    }, 30_000);
     return () => window.clearInterval(intervalId);
   }, [currentUser, dashboardArticleIdsKey, isTrashVisible, refreshContentWritingSummaries]);
-
-  useEffect(() => {
-    if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0 || isTrashVisible) return;
-    const supabase = getSupabaseClient();
-    let refreshTimer: number | null = null;
-    const scheduleRefresh = () => {
-      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => {
-        refreshTimer = null;
-        void refreshContentWritingSummaries();
-      }, 350);
-    };
-    const channel = supabase
-      .channel(`dashboard-content-writing-${currentUserId || 'profile'}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'content_writing_sessions' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'content_writing_steps' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'content_writing_automation_items' }, scheduleRefresh)
-      .subscribe();
-
-    return () => {
-      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      void supabase.removeChannel(channel);
-    };
-  }, [currentUser, currentUserId, dashboardArticleIdsKey, isTrashVisible, refreshContentWritingSummaries]);
-
-  useEffect(() => {
-    if (!currentUser || !isSupabaseConfigured || dashboardArticleIds.length === 0) return;
-    const supabase = getSupabaseClient();
-    let refreshTimer: number | null = null;
-    const scheduleRefresh = () => {
-      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => {
-        refreshTimer = null;
-        void refreshExternalAnalysisSummaries();
-      }, 350);
-    };
-    const channel = supabase
-      .channel(`dashboard-external-analysis-${currentUserId || 'profile'}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ai_external_analysis_jobs' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ai_external_analysis_article_state' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'article_competitors' }, scheduleRefresh)
-      .subscribe();
-
-    return () => {
-      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      void supabase.removeChannel(channel);
-    };
-  }, [currentUser, currentUserId, dashboardArticleIdsKey, refreshExternalAnalysisSummaries]);
 
   useEffect(() => {
     if (!isAdmin) {

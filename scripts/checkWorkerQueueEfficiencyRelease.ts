@@ -2,19 +2,26 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const root = process.cwd();
-const migration = '20260728020000_worker_queue_wake_signals.sql';
-const migrationPath = path.join(root, 'supabase', 'migrations', migration);
-const migrationInfo = await stat(migrationPath);
-if (!migrationInfo.isFile() || migrationInfo.size < 1_000) {
-  throw new Error(`Worker queue efficiency migration is missing or incomplete: ${migration}`);
+const migrations = [
+  '20260728020000_worker_queue_wake_signals.sql',
+  '20261102000000_reduce_automation_database_load.sql',
+];
+for (const migration of migrations) {
+  const migrationPath = path.join(root, 'supabase', 'migrations', migration);
+  const migrationInfo = await stat(migrationPath);
+  if (!migrationInfo.isFile() || migrationInfo.size < 1_000) {
+    throw new Error(`Worker queue efficiency migration is missing or incomplete: ${migration}`);
+  }
 }
 
 const deploymentGuide = await readFile(
   path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'),
   'utf8',
 );
-if (!deploymentGuide.includes(migration)) {
-  throw new Error(`Deployment guide does not include worker queue migration: ${migration}`);
+for (const migration of migrations) {
+  if (!deploymentGuide.includes(migration)) {
+    throw new Error(`Deployment guide does not include worker queue migration: ${migration}`);
+  }
 }
 
 const bundles = [
@@ -34,8 +41,8 @@ for (const bundle of bundles) {
 
 console.log(JSON.stringify({
   ok: true,
-  migration,
+  migrations,
   idleFallbackMaximumMs: 30_000,
-  estimatedMaximumIdleClaimsPerHour: 720,
+  estimatedMaximumIdleClaimsPerHour: 480,
   bundles,
 }, null, 2));

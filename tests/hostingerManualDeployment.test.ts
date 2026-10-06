@@ -24,13 +24,13 @@ test('manual Hostinger deployment verifies the commit and restarts only approved
   assert.doesNotMatch(script, /pm2 restart all/);
   assert.match(script, /bazarvan-editor-staging/);
   assert.match(script, /bazarvan-staging-content-writing-worker/);
-  assert.match(script, /bazarvan-staging-content-writing-preparation-worker/);
-  assert.match(script, /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=content_writing_preparation/);
+  assert.match(script, /bazarvan-staging-automation-worker/);
+  assert.match(script, /LEGACY_AUTOMATION_APPS/);
+  assert.match(script, /pm2 delete/);
   assert.match(script, /EXTERNAL_ANALYSIS_AUTOMATION_MASTER=true/);
-  assert.match(script, /EXTERNAL_ANALYSIS_AUTOMATION_MASTER=false/);
   assert.match(
     script,
-    /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command/,
+    /EXTERNAL_ANALYSIS_WORKER_JOB_TYPES=semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup,competitor_discovery,competitor_extraction,full_article_pipeline,content_writing_preparation/,
   );
   assert.match(script, /pm2 start server-dist\/external-analysis-worker\.mjs/);
   assert.match(script, /bazarvan-staging-client-page-crawler/);
@@ -46,9 +46,9 @@ test('Hostinger schema scripts and guide track the current production migrations
     readFile(path.join(root, 'deploy', 'HOSTINGER_CANONICAL_DEPLOY.md'), 'utf8'),
   ]);
 
-  assert.match(applyScript, /EXPECTED_MIGRATIONS:-157/);
-  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-157/);
-  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=157/);
+  assert.match(applyScript, /EXPECTED_MIGRATIONS:-158/);
+  assert.match(verifyScript, /EXPECTED_MIGRATIONS:-158/);
+  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=158/);
   assert.match(deployScript, /verify-project-schema\.sh/);
   assert.match(verifyScript, /get_visible_automation_task_inventory_v20/);
   assert.match(verifyScript, /INDEPENDENT_COMPETITOR_DISCOVERY/);
@@ -62,6 +62,7 @@ test('Hostinger schema scripts and guide track the current production migrations
   assert.match(verifyScript, /release_recoverable_automatic_focus_stalls/);
   assert.match(verifyScript, /get_automatic_article_focus_v19/);
   assert.match(guide, /20261006000000_article_work_readiness_orchestration\.sql/);
+  assert.match(guide, /20261102000000_reduce_automation_database_load\.sql/);
   assert.match(guide, /20261007000000_finish_focused_article_first\.sql/);
   assert.match(guide, /20261030000000_release_scheduled_post_write_focus\.sql/);
   assert.match(guide, /20261008000000_complete_satisfied_competitor_preparation\.sql/);

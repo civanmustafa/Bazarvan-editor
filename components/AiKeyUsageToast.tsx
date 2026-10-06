@@ -36,7 +36,6 @@ import {
   loadRecentExternalAnalysisJobs,
 } from '../utils/externalAnalysis';
 import { projectExternalAnalysisActivity } from '../utils/externalAnalysisActivityBridge';
-import { getSupabaseClient } from '../utils/supabaseClient';
 
 const TERMINAL_NOTICE_TTL_MS = 60_000;
 const MAX_TERMINAL_FEED_ACTIVITIES = 24;
@@ -254,7 +253,6 @@ const useAiExecutionActivityFeed = (
     if (!articleId) return;
     let disposed = false;
     let requestInFlight = false;
-    let refreshTimer: number | null = null;
 
     const reconcileDurableJobs = async () => {
       if (disposed || requestInFlight) return;
@@ -300,47 +298,14 @@ const useAiExecutionActivityFeed = (
       }
     };
 
-    const scheduleRefresh = () => {
-      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => {
-        refreshTimer = null;
-        void reconcileDurableJobs();
-      }, 250);
-    };
-
     void reconcileDurableJobs();
-    const intervalId = window.setInterval(() => { void reconcileDurableJobs(); }, 5_000);
-    let channel: any = null;
-    try {
-      const supabase = getSupabaseClient();
-      channel = supabase
-        .channel(`editor-ai-tasks-${articleId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'ai_external_analysis_jobs',
-            filter: `article_id=eq.${articleId}`,
-          },
-          scheduleRefresh,
-        )
-        .subscribe();
-    } catch (error) {
-      console.warn('Could not subscribe to durable AI tasks for the open article.', error);
-    }
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void reconcileDurableJobs();
+    }, 15_000);
 
     return () => {
       disposed = true;
       window.clearInterval(intervalId);
-      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
-      if (channel) {
-        try {
-          void getSupabaseClient().removeChannel(channel);
-        } catch (error) {
-          console.warn('Could not remove the durable AI task subscription.', error);
-        }
-      }
     };
   }, [articleId, articleKey]);
 
@@ -432,8 +397,8 @@ export const DashboardAiExecutionMonitor: React.FC<DashboardAiExecutionMonitorPr
 
     void reconcileExternalJobs();
     const intervalId = window.setInterval(() => {
-      void reconcileExternalJobs();
-    }, 6_000);
+      if (document.visibilityState === 'visible') void reconcileExternalJobs();
+    }, 15_000);
     return () => {
       disposed = true;
       window.clearInterval(intervalId);

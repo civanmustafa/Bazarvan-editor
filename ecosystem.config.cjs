@@ -12,32 +12,12 @@ module.exports = {
         GEMINI_PER_KEY_TIMEOUT_MS: process.env.GEMINI_PER_KEY_TIMEOUT_MS || '75000',
       },
     },
-    // Firecrawl owns competitor discovery/extraction. Keep Gemini-backed job types out
-    // of this process so provider failures cannot delay competitor retrieval.
+    // One PM2 automation process owns every external-analysis job type. Two internal
+    // slots are required because the full-article and writing-preparation coordinators
+    // wait for child jobs from the same durable queue. This still limits provider work
+    // to one child beside the coordinator and removes three idle polling processes.
     {
-      name: 'bazarvan-competitor-worker',
-      script: 'server-dist/external-analysis-worker.mjs',
-      cwd: __dirname,
-      exec_mode: 'fork',
-      instances: 1,
-      autorestart: true,
-      restart_delay: 2000,
-      kill_timeout: 10000,
-      env: {
-        NODE_ENV: 'production',
-        EXTERNAL_ANALYSIS_AUTOMATION_MASTER: 'false',
-        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'competitor_discovery,competitor_extraction',
-        EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.COMPETITOR_WORKER_POLL_MS || '3000',
-        EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.COMPETITOR_WORKER_IDLE_MAX_MS || '30000',
-        EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS || '300',
-        EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
-        EXTERNAL_ANALYSIS_MAX_RETRY_COUNT: process.env.EXTERNAL_ANALYSIS_MAX_RETRY_COUNT || '5',
-        EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: process.env.COMPETITOR_WORKER_CONCURRENCY || '3',
-      },
-    },
-    // Semantic and engineering AI work stays separate from the Firecrawl process above.
-    {
-      name: 'bazarvan-ai-worker',
+      name: 'bazarvan-automation-worker',
       script: 'server-dist/external-analysis-worker.mjs',
       cwd: __dirname,
       exec_mode: 'fork',
@@ -48,61 +28,14 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         EXTERNAL_ANALYSIS_AUTOMATION_MASTER: 'true',
-        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup',
-        EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.EXTERNAL_ANALYSIS_WORKER_POLL_MS || '5000',
+        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'semantic_keywords_lsi,content_brief_generation,meta_description_generation,engineering_command,duplicate_cleanup,competitor_discovery,competitor_extraction,full_article_pipeline,content_writing_preparation',
+        EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.EXTERNAL_ANALYSIS_WORKER_POLL_MS || '10000',
         EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS || '30000',
-        EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS || '300',
+        EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS || '1800',
         EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
         EXTERNAL_ANALYSIS_MAX_RETRY_COUNT: process.env.EXTERNAL_ANALYSIS_MAX_RETRY_COUNT || '5',
         EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: process.env.EXTERNAL_ANALYSIS_WORKER_CONCURRENCY || '2',
         GEMINI_PER_KEY_TIMEOUT_MS: process.env.GEMINI_PER_KEY_TIMEOUT_MS || '75000',
-      },
-    },
-    // The coordinator waits for the specialized workers and never performs provider
-    // or Firecrawl work itself. A dedicated process prevents multiple long workflows
-    // from occupying all Gemini worker slots while their child tasks are running.
-    {
-      name: 'bazarvan-full-article-pipeline-worker',
-      script: 'server-dist/external-analysis-worker.mjs',
-      cwd: __dirname,
-      exec_mode: 'fork',
-      instances: 1,
-      autorestart: true,
-      restart_delay: 2000,
-      kill_timeout: 15000,
-      env: {
-        NODE_ENV: 'production',
-        EXTERNAL_ANALYSIS_AUTOMATION_MASTER: 'false',
-        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'full_article_pipeline',
-        EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.FULL_ARTICLE_PIPELINE_WORKER_POLL_MS || '5000',
-        EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.FULL_ARTICLE_PIPELINE_WORKER_IDLE_MAX_MS || '30000',
-        EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.FULL_ARTICLE_PIPELINE_LEASE_SECONDS || '1800',
-        EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
-        EXTERNAL_ANALYSIS_MAX_RETRY_COUNT: process.env.EXTERNAL_ANALYSIS_MAX_RETRY_COUNT || '5',
-        EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: '1',
-      },
-    },
-    // Coordinates automatic competitor discovery/extraction for the ordinary
-    // "Write article" path. Provider work remains in the specialized workers.
-    {
-      name: 'bazarvan-content-writing-preparation-worker',
-      script: 'server-dist/external-analysis-worker.mjs',
-      cwd: __dirname,
-      exec_mode: 'fork',
-      instances: 1,
-      autorestart: true,
-      restart_delay: 2000,
-      kill_timeout: 15000,
-      env: {
-        NODE_ENV: 'production',
-        EXTERNAL_ANALYSIS_AUTOMATION_MASTER: 'false',
-        EXTERNAL_ANALYSIS_WORKER_JOB_TYPES: 'content_writing_preparation',
-        EXTERNAL_ANALYSIS_WORKER_POLL_MS: process.env.CONTENT_WRITING_PREPARATION_WORKER_POLL_MS || '5000',
-        EXTERNAL_ANALYSIS_WORKER_IDLE_MAX_MS: process.env.CONTENT_WRITING_PREPARATION_WORKER_IDLE_MAX_MS || '30000',
-        EXTERNAL_ANALYSIS_JOB_LEASE_SECONDS: process.env.CONTENT_WRITING_PREPARATION_LEASE_SECONDS || '1800',
-        EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
-        EXTERNAL_ANALYSIS_MAX_RETRY_COUNT: process.env.EXTERNAL_ANALYSIS_MAX_RETRY_COUNT || '5',
-        EXTERNAL_ANALYSIS_WORKER_CONCURRENCY: '1',
       },
     },
     {
@@ -116,10 +49,10 @@ module.exports = {
       kill_timeout: 10000,
       env: {
         NODE_ENV: 'production',
-        AI_JOB_WORKER_POLL_MS: process.env.AI_JOB_WORKER_POLL_MS || '1500',
+        AI_JOB_WORKER_POLL_MS: process.env.AI_JOB_WORKER_POLL_MS || '10000',
         AI_JOB_WORKER_IDLE_MAX_MS: process.env.AI_JOB_WORKER_IDLE_MAX_MS || '30000',
         AI_JOB_LEASE_SECONDS: process.env.AI_JOB_LEASE_SECONDS || '300',
-        AI_JOB_WORKER_CONCURRENCY: process.env.AI_JOB_WORKER_CONCURRENCY || '2',
+        AI_JOB_WORKER_CONCURRENCY: process.env.AI_JOB_WORKER_CONCURRENCY || '1',
         EXTERNAL_ANALYSIS_RETRY_MINUTES: process.env.EXTERNAL_ANALYSIS_RETRY_MINUTES || '30',
         GEMINI_PER_KEY_TIMEOUT_MS: process.env.GEMINI_PER_KEY_TIMEOUT_MS || '75000',
       },
@@ -135,7 +68,7 @@ module.exports = {
       kill_timeout: 15000,
       env: {
         NODE_ENV: 'production',
-        CONTENT_WRITING_WORKER_POLL_MS: process.env.CONTENT_WRITING_WORKER_POLL_MS || '1500',
+        CONTENT_WRITING_WORKER_POLL_MS: process.env.CONTENT_WRITING_WORKER_POLL_MS || '10000',
         CONTENT_WRITING_WORKER_IDLE_MAX_MS: process.env.CONTENT_WRITING_WORKER_IDLE_MAX_MS || '30000',
         CONTENT_WRITING_SESSION_LEASE_SECONDS: process.env.CONTENT_WRITING_SESSION_LEASE_SECONDS || '1800',
         CONTENT_WRITING_WORKER_CONCURRENCY: process.env.CONTENT_WRITING_WORKER_CONCURRENCY || '1',
@@ -153,10 +86,10 @@ module.exports = {
       kill_timeout: 15000,
       env: {
         NODE_ENV: 'production',
-        CLIENT_PAGE_CRAWLER_POLL_MS: process.env.CLIENT_PAGE_CRAWLER_POLL_MS || '2500',
+        CLIENT_PAGE_CRAWLER_POLL_MS: process.env.CLIENT_PAGE_CRAWLER_POLL_MS || '10000',
         CLIENT_PAGE_CRAWLER_IDLE_MAX_MS: process.env.CLIENT_PAGE_CRAWLER_IDLE_MAX_MS || '30000',
         CLIENT_PAGE_CRAWLER_LEASE_SECONDS: process.env.CLIENT_PAGE_CRAWLER_LEASE_SECONDS || '180',
-        CLIENT_PAGE_CRAWLER_CONCURRENCY: process.env.CLIENT_PAGE_CRAWLER_CONCURRENCY || '2',
+        CLIENT_PAGE_CRAWLER_CONCURRENCY: process.env.CLIENT_PAGE_CRAWLER_CONCURRENCY || '1',
         CLIENT_PAGE_CRAWLER_TIMEOUT_MS: process.env.CLIENT_PAGE_CRAWLER_TIMEOUT_MS || '45000',
         CLIENT_PAGE_CRAWLER_MAX_BYTES: process.env.CLIENT_PAGE_CRAWLER_MAX_BYTES || '2500000',
         CLIENT_PAGE_CRAWLER_RETRY_SECONDS: process.env.CLIENT_PAGE_CRAWLER_RETRY_SECONDS || '60',
