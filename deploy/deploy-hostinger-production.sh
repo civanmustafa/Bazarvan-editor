@@ -85,7 +85,7 @@ set -a
 source .env.production
 set +a
 
-BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=158 \
+BAZARVAN_APPROVE_MIGRATIONS=1 BAZARVAN_ALLOW_STOPPED_PM2=1 EXPECTED_MIGRATIONS=158 \
   bash deploy/hostinger-supabase/apply-project-migrations.sh
 
 npm ci --include=dev

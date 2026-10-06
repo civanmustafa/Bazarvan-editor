@@ -33,7 +33,9 @@ check_existing_services() {
       || fail "A Docker container that was running before migration has stopped: ${container_id}"
   done
 
-  if command -v pm2 >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  if [[ "${BAZARVAN_ALLOW_STOPPED_PM2:-}" != "1" ]] \
+    && command -v pm2 >/dev/null 2>&1 \
+    && command -v jq >/dev/null 2>&1; then
     local pm2_not_online
     pm2_not_online="$(pm2 jlist | jq '[.[] | select(.pm2_env.status != "online")] | length')"
     (( pm2_not_online == 0 )) \

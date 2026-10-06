@@ -18,6 +18,7 @@ test('manual Hostinger deployment verifies the commit and restarts only approved
   assert.match(script, /npm run build/);
   assert.match(script, /pm2 describe/);
   assert.match(script, /pm2 save/);
+  assert.match(script, /BAZARVAN_ALLOW_STOPPED_PM2=1/);
   assert.match(script, /enqueue_competitor_discovery_job_by_signature/);
   assert.match(script, /content_research_automation_changed/);
   assert.match(script, /blockedBy.*semantic_keywords/s);
@@ -48,7 +49,7 @@ test('Hostinger schema scripts and guide track the current production migrations
 
   assert.match(applyScript, /EXPECTED_MIGRATIONS:-158/);
   assert.match(verifyScript, /EXPECTED_MIGRATIONS:-158/);
-  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 EXPECTED_MIGRATIONS=158/);
+  assert.match(deployScript, /BAZARVAN_APPROVE_MIGRATIONS=1 BAZARVAN_ALLOW_STOPPED_PM2=1 EXPECTED_MIGRATIONS=158/);
   assert.match(deployScript, /verify-project-schema\.sh/);
   assert.match(verifyScript, /get_visible_automation_task_inventory_v20/);
   assert.match(verifyScript, /INDEPENDENT_COMPETITOR_DISCOVERY/);
