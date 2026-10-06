@@ -30,6 +30,7 @@ const distDir = process.env.STATIC_DIR
   ? path.resolve(process.env.STATIC_DIR)
   : path.join(projectRoot, 'dist');
 const port = Number.parseInt(process.env.PORT || '8080', 10) || 8080;
+const readinessProbeTimeoutMs = 15_000;
 
 const runApiHandler = (handler: ApiHandler): RequestHandler => async (req, res, next) => {
   try {
@@ -64,10 +65,10 @@ const healthzHandler: RequestHandler = (_req, res) => {
 const readyzHandler: RequestHandler = async (_req, res) => {
   const staticBuild = fs.existsSync(path.join(distDir, 'index.html'));
   const [contentWriting, adminAiProviderSecrets, clientCenter, externalAnalysisWorker, userAutomation] = await Promise.all([
-    checkContentWritingReadiness(),
+    checkContentWritingReadiness({ timeoutMs: readinessProbeTimeoutMs }),
     checkAdminAiProviderSecretsReadiness(),
-    checkClientCenterReadiness(),
-    checkExternalAnalysisQueueReadiness(),
+    checkClientCenterReadiness({ timeoutMs: readinessProbeTimeoutMs }),
+    checkExternalAnalysisQueueReadiness({ timeoutMs: readinessProbeTimeoutMs }),
     checkUserAutomationReadiness(),
   ]);
   const ok = staticBuild

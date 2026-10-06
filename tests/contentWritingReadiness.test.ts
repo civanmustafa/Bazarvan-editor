@@ -209,6 +209,9 @@ test('production release gate verifies ordered migrations, bundles, and readines
   assert.match(releaseScript, /resume_next_automatic_content_writing_session/);
   assert.match(releaseScript, /Competitor-preparation worker bundle is missing marker/);
   assert.match(server, /app\.get\('\/readyz', readyzHandler\)/);
+  assert.match(server, /checkContentWritingReadiness\(\{ timeoutMs: readinessProbeTimeoutMs \}\)/);
+  assert.match(server, /checkClientCenterReadiness\(\{ timeoutMs: readinessProbeTimeoutMs \}\)/);
+  assert.match(server, /checkExternalAnalysisQueueReadiness\(\{ timeoutMs: readinessProbeTimeoutMs \}\)/);
   assert.match(server, /toPublicContentWritingReadiness/);
   assert.match(server, /toPublicExternalAnalysisQueueReadiness/);
   assert.match(server, /const degraded = ok && !externalAnalysisWorker\.ok/);

@@ -177,7 +177,7 @@ wait_for_endpoint() {
   local endpoint="$1"
   local attempt
   for attempt in {1..12}; do
-    if curl --fail --silent --show-error --max-time 15 "${endpoint}" >/dev/null; then
+    if curl --fail --silent --show-error --max-time 30 "${endpoint}" >/dev/null; then
       return 0
     fi
     if (( attempt < 12 )); then

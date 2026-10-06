@@ -37,6 +37,7 @@ test('manual Hostinger deployment verifies the commit and restarts only approved
   assert.match(script, /bazarvan-staging-client-page-crawler/);
   assert.match(script, /smarteditor\.bazarvan\.com\/healthz/);
   assert.match(script, /smarteditor\.bazarvan\.com\/readyz/);
+  assert.match(script, /--max-time 30/);
 });
 
 test('Hostinger schema scripts and guide track the current production migrations', async () => {
